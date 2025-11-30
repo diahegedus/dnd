@@ -28,13 +28,16 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (DINAMIKUS MODELL KERESÉS) ---
+# --- 3. AI MOTOR (STABIL: CSAK FLASH) ---
 def query_ai_with_search(prompt, api_key):
-    if not api_key: return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
+    # Ellenőrzés: Van-e kulcs?
+    if not api_key: 
+        return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
+    
     try:
         genai.configure(api_key=api_key)
         
-        # Kaland Kontextus
+        # Kaland Kontextus összeállítása
         adv_context = json.dumps(st.session_state.active_adventure, ensure_ascii=False)
         inv_context = ", ".join(st.session_state.inventory)
         
@@ -45,45 +48,24 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # 1. PRÓBA: Standard Flash (A legjobb ingyenes)
+        # KIZÁRÓLAG a 'gemini-1.5-flash' modellt használjuk.
+        # Nem keresünk mást, nem próbálgatunk. Ez a legbiztosabb ingyenes modell.
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
             return response.text
-        except Exception:
-            pass # Ha nem megy, lépünk tovább
-
-        # 2. PRÓBA: Régi Pro
-        try:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-            return response.text
-        except Exception:
-            pass # Ez se ment...
-
-        # 3. VÉGSŐ MEGOLDÁS: Amit a szerver talál
-        # Lekérjük az elérhető modellek listáját és választunk egyet
-        try:
-            available_models = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name)
             
-            if available_models:
-                # Keressünk egy 'gemini' nevűt a listában
-                best_model_name = next((m for m in available_models if "gemini" in m), available_models[0])
-                
-                model = genai.GenerativeModel(best_model_name)
-                response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-                return f"⚠️ [Mentőöv modell: {best_model_name}]\n{response.text}"
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg:
+                return "⛔ **Napi Limit Betelt!** ⛔\n\nA `gemini-1.5-flash` modell ingyenes kerete mára elfogyott.\nMegoldás: Kérj új kulcsot egy ÚJ projektben a Google AI Studio-ban."
+            elif "404" in error_msg:
+                return "⚠️ **Szerver Hiba (404)**\nA Streamlit szervere nem találja a modellt. Kérlek frissítsd a `requirements.txt`-t a GitHubon `google-generativeai>=0.8.3`-ra és indítsd újra az Appot (Reboot)."
             else:
-                return "❌ A rendszer nem talált egyetlen használható AI modellt sem."
-                
-        except Exception as e_fatal:
-            return f"Kritikus Hiba: {str(e_fatal)}"
+                return f"AI Hiba: {error_msg}"
 
     except Exception as e:
-        return f"AI Konfigurációs Hiba: {str(e)}"
+        return f"Konfigurációs Hiba: {str(e)}"
 
 def roll_dice(sides, count=1):
     rolls = [random.randint(1, sides) for _ in range(count)]
@@ -94,7 +76,7 @@ def roll_dice(sides, count=1):
 with st.sidebar:
     st.title("🛠️ DM Pult")
     
-    # --- API KULCS KEZELÉS ---
+    # --- API KULCS KEZELÉS (SECRETS + MANUAL) ---
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
         st.success("🔐 Kulcs betöltve a Secrets-ből!")
@@ -103,9 +85,9 @@ with st.sidebar:
         if not api_key:
             st.warning("Nincs kulcs megadva.")
         else:
-            st.success("Kulcs megadva!")
+            st.success("Manuális kulcs aktív!")
 
-    # 1. TABOK
+    # TABOK
     tab_tools, tab_init, tab_ai_settings = st.tabs(["Kocka", "Harc", "Beállítás"])
     
     with tab_tools:
@@ -165,7 +147,6 @@ with tab_chat:
     if not HAS_AI:
         st.error("Nincs telepítve a `google-generativeai` csomag!")
     
-    # Chat ürítése gomb
     if st.button("Chat Törlése", key="clear_chat"):
         st.session_state.chat_history = []
         st.rerun()
