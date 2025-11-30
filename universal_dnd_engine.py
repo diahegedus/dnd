@@ -28,7 +28,7 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (Hibátűrő verzió) ---
+# --- 3. AI MOTOR (3-lépcsős hibatűrés) ---
 def query_ai_with_search(prompt, api_key):
     if not api_key: return "⚠️ Nincs API kulcs! Írd be oldalt és nyomj ENTER-t!"
     try:
@@ -45,23 +45,28 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # 1. PRÓBA: Kereséssel (Ez dobhat hibát, ha régi a szerver)
+        # 1. PRÓBA: Kereséssel (Legújabb)
         try:
             tools = [{"google_search": {}}]
             model = genai.GenerativeModel('gemini-2.0-flash-exp', tools=tools)
             response = model.generate_content(f"{system_prompt}\n(Használj Google Keresést ha kell)\n\nKÉRDÉS: {prompt}")
             return response.text
             
-        except Exception as e_search:
-            # 2. PRÓBA: Ha a fenti nem ment, visszaváltunk sima módra (Keresés nélkül)
-            # Így nem omlik össze az app, csak kiírja, hogy offline módban van
+        except Exception:
+            # 2. PRÓBA: Offline Flash (Keresés nélkül)
             try:
-                model = genai.GenerativeModel('gemini-1.5-flash') # Eszközök nélkül
-                fallback_prompt = f"{system_prompt}\n(Megjegyzés: A Google Keresés nem elérhető, válaszolj belső tudásból.)\n\nKÉRDÉS: {prompt}"
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                fallback_prompt = f"{system_prompt}\n(Válaszolj belső tudásból.)\n\nKÉRDÉS: {prompt}"
                 response = model.generate_content(fallback_prompt)
                 return f"⚠️ [Keresés nem elérhető - Offline mód]\n{response.text}"
-            except Exception as e_fatal:
-                return f"Kritikus AI Hiba: {str(e_fatal)}"
+            except Exception:
+                # 3. PRÓBA: Régi 'gemini-pro' (Ez biztosan működik régi szerveren is!)
+                try:
+                    model = genai.GenerativeModel('gemini-pro')
+                    response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+                    return f"⚠️ [Régi modell aktív - Kompatibilis mód]\n{response.text}"
+                except Exception as e_fatal:
+                    return f"Kritikus AI Hiba: {str(e_fatal)}"
 
     except Exception as e:
         return f"AI Konfigurációs Hiba: {str(e)}"
