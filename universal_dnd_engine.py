@@ -12,7 +12,7 @@ except ImportError:
     HAS_AI = False
 
 # --- 1. KONFIGURÁCIÓ ---
-st.set_page_config(page_title="AI DM Pult", page_icon="🐉", layout="wide")
+st.set_page_config(page_title="AI DM Pult (Stabil)", page_icon="🐉", layout="wide")
 
 DEFAULT_ADVENTURE = {
     "title": "Üres Kaland",
@@ -28,7 +28,7 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (STABIL: CSAK FLASH) ---
+# --- 3. AI MOTOR (KOMPATIBILIS MÓD: CSAK RÉGI PRO) ---
 def query_ai_with_search(prompt, api_key):
     # Ellenőrzés: Van-e kulcs?
     if not api_key: 
@@ -48,21 +48,20 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # KIZÁRÓLAG a 'gemini-1.5-flash' modellt használjuk.
-        # Nem keresünk mást, nem próbálgatunk. Ez a legbiztosabb ingyenes modell.
+        # KIZÁRÓLAG a RÉGI 'gemini-pro' modellt használjuk.
+        # Ez a legbiztosabb, mert minden szerveren elérhető.
+        # Nem próbálkozunk Flash-el vagy 1.5-tel, mert azok okozzák a 404-et.
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-pro')
             response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
             return response.text
             
         except Exception as e:
+            # Ha még ez sem megy, akkor nagy baj van (pl. 429 Limit)
             error_msg = str(e)
             if "429" in error_msg:
-                return "⛔ **Napi Limit Betelt!** ⛔\n\nA `gemini-1.5-flash` modell ingyenes kerete mára elfogyott.\nMegoldás: Kérj új kulcsot egy ÚJ projektben a Google AI Studio-ban."
-            elif "404" in error_msg:
-                return "⚠️ **Szerver Hiba (404)**\nA Streamlit szervere nem találja a modellt. Kérlek frissítsd a `requirements.txt`-t a GitHubon `google-generativeai>=0.8.3`-ra és indítsd újra az Appot (Reboot)."
-            else:
-                return f"AI Hiba: {error_msg}"
+                 return "⛔ **Napi Limit Betelt!** ⛔\n\nA kereted elfogyott. Megoldás: Új kulcs egy ÚJ projektben."
+            return f"⚠️ **AI Hiba:** {error_msg}"
 
     except Exception as e:
         return f"Konfigurációs Hiba: {str(e)}"
@@ -76,7 +75,7 @@ def roll_dice(sides, count=1):
 with st.sidebar:
     st.title("🛠️ DM Pult")
     
-    # --- API KULCS KEZELÉS (SECRETS + MANUAL) ---
+    # --- API KULCS KEZELÉS ---
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
         st.success("🔐 Kulcs betöltve a Secrets-ből!")
