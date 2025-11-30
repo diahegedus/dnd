@@ -28,7 +28,7 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (ÖNJAVÍTÓ / SELF-HEALING) ---
+# --- 3. AI MOTOR (TAKARÉKOS MÓD / STABLE) ---
 def query_ai_with_search(prompt, api_key):
     if not api_key: return "⚠️ Nincs API kulcs! Írd be oldalt és nyomj ENTER-t!"
     try:
@@ -45,43 +45,20 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # 1. PRÓBA: Legújabb keresős modell
-        try:
-            tools = [{"google_search": {}}]
-            model = genai.GenerativeModel('gemini-2.0-flash-exp', tools=tools)
-            response = model.generate_content(f"{system_prompt}\n(Használj Google Keresést ha kell)\n\nKÉRDÉS: {prompt}")
-            return response.text
-        except Exception:
-            pass # Ha nem megy, lépünk tovább csendben
-
-        # 2. PRÓBA: Offline Flash
+        # KIZÁRÓLAG a 'gemini-1.5-flash' modellt használjuk.
+        # Ez a legstabilabb és legnagyobb kerettel rendelkező ingyenes modell.
+        # Nem kísérletezünk más modellekkel, hogy elkerüljük a 429-es hibát.
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(f"{system_prompt}\n(Válaszolj belső tudásból.)\n\nKÉRDÉS: {prompt}")
-            return f"⚠️ [Offline mód]\n{response.text}"
-        except Exception:
-            pass # Ez se ment...
-
-        # 3. VÉGSŐ MEGOLDÁS: DINAMIKUS MODELL KERESÉS
-        # Ez a rész megkérdezi a szervert, hogy MI VAN, és azt használja.
-        try:
-            available_models = []
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    available_models.append(m.name)
+            response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+            return response.text
             
-            if available_models:
-                # Keressünk egy "gemini" nevűt, vagy vegyük az legelsőt
-                best_model = next((m for m in available_models if "gemini" in m), available_models[0])
-                
-                model = genai.GenerativeModel(best_model)
-                response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-                return f"⚠️ [Mentőöv modell: {best_model}]\n{response.text}"
+        except Exception as e:
+            # Speciális hibaüzenet, ha a limit betelt
+            if "429" in str(e):
+                return "⛔ **Napi Limit Betelt!** ⛔\n\nA Google ingyenes kerete mára elfogyott erre a kulcsra.\n\n**Megoldás:**\n1. Menj a [Google AI Studio](https://aistudio.google.com/app/apikey) oldalra.\n2.ozz létre egy **ÚJ PROJEKTET** (New Project).\n3. Kérj abban egy új kulcsot.\n4. Írd be ide az új kulcsot."
             else:
-                return "❌ A szerver nem talál egyetlen AI modellt sem. Ellenőrizd a `requirements.txt` fájlt!"
-                
-        except Exception as e_fatal:
-            return f"Kritikus Hiba: {str(e_fatal)}"
+                return f"AI Hiba: {str(e)}"
 
     except Exception as e:
         return f"AI Konfigurációs Hiba: {str(e)}"
