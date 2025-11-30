@@ -28,17 +28,13 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR ---
+# --- 3. AI MOTOR (Hibátűrő verzió) ---
 def query_ai_with_search(prompt, api_key):
     if not api_key: return "⚠️ Nincs API kulcs! Írd be oldalt és nyomj ENTER-t!"
     try:
         genai.configure(api_key=api_key)
-        tools = [{"google_search": {}}] 
-        try:
-            model = genai.GenerativeModel('gemini-2.0-flash-exp', tools=tools)
-        except:
-             model = genai.GenerativeModel('gemini-1.5-flash', tools=tools)
         
+        # Kaland Kontextus
         adv_context = json.dumps(st.session_state.active_adventure, ensure_ascii=False)
         inv_context = ", ".join(st.session_state.inventory)
         
@@ -47,12 +43,28 @@ def query_ai_with_search(prompt, api_key):
         Források:
         1. KALAND: {adv_context}
         2. INVENTORY: {inv_context}
-        Használd a Google Keresést szabálykérdésekhez.
         """
-        response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-        return response.text
+        
+        # 1. PRÓBA: Kereséssel (Ez dobhat hibát, ha régi a szerver)
+        try:
+            tools = [{"google_search": {}}]
+            model = genai.GenerativeModel('gemini-2.0-flash-exp', tools=tools)
+            response = model.generate_content(f"{system_prompt}\n(Használj Google Keresést ha kell)\n\nKÉRDÉS: {prompt}")
+            return response.text
+            
+        except Exception as e_search:
+            # 2. PRÓBA: Ha a fenti nem ment, visszaváltunk sima módra (Keresés nélkül)
+            # Így nem omlik össze az app, csak kiírja, hogy offline módban van
+            try:
+                model = genai.GenerativeModel('gemini-1.5-flash') # Eszközök nélkül
+                fallback_prompt = f"{system_prompt}\n(Megjegyzés: A Google Keresés nem elérhető, válaszolj belső tudásból.)\n\nKÉRDÉS: {prompt}"
+                response = model.generate_content(fallback_prompt)
+                return f"⚠️ [Keresés nem elérhető - Offline mód]\n{response.text}"
+            except Exception as e_fatal:
+                return f"Kritikus AI Hiba: {str(e_fatal)}"
+
     except Exception as e:
-        return f"AI Hiba: {str(e)}"
+        return f"AI Konfigurációs Hiba: {str(e)}"
 
 def roll_dice(sides, count=1):
     rolls = [random.randint(1, sides) for _ in range(count)]
@@ -63,7 +75,7 @@ def roll_dice(sides, count=1):
 with st.sidebar:
     st.title("🛠️ DM Pult")
     
-    # API Kulcs kezelése globálisan (hogy biztosan meglegyen)
+    # API Kulcs kezelése
     api_key = st.session_state.get("google_api_key", "")
 
     # 1. TABOK
@@ -106,7 +118,6 @@ with st.sidebar:
             st.warning("Nincs megadva kulcs!")
             
         st.markdown("[👉 Ingyenes kulcs (Google AI Studio)](https://aistudio.google.com/app/apikey)")
-        # A text_input frissíti a session_state['google_api_key'] értékét
         st.text_input("Google API Kulcs", type="password", key="google_api_key")
         
         uploaded_file = st.file_uploader("Kaland JSON", type="json")
@@ -134,7 +145,7 @@ with tab_chat:
     if not HAS_AI:
         st.error("Nincs telepítve a `google-generativeai` csomag!")
     
-    # Chat ürítése gomb (ha belezavarna a régi hibaüzenet)
+    # Chat ürítése gomb
     if st.button("Chat Törlése", key="clear_chat"):
         st.session_state.chat_history = []
         st.rerun()
@@ -151,7 +162,6 @@ with tab_chat:
             
         with st.chat_message("assistant"):
             with st.spinner("Keresés..."):
-                # Itt most már közvetlenül a session_state-ből olvassuk a kulcsot
                 current_api_key = st.session_state.get("google_api_key")
                 response = query_ai_with_search(prompt, current_api_key)
                 st.write(response)
