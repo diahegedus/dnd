@@ -12,7 +12,7 @@ except ImportError:
     HAS_AI = False
 
 # --- 1. KONFIGURÁCIÓ ---
-st.set_page_config(page_title="AI DM Pult (Stabil)", page_icon="🐉", layout="wide")
+st.set_page_config(page_title="AI DM Pult (Auto)", page_icon="🐉", layout="wide")
 
 DEFAULT_ADVENTURE = {
     "title": "Üres Kaland",
@@ -28,16 +28,32 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (KOMPATIBILIS MÓD: CSAK RÉGI PRO) ---
-def query_ai_with_search(prompt, api_key):
-    # Ellenőrzés: Van-e kulcs?
-    if not api_key: 
-        return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
+# --- 3. AI MOTOR (AUTO-DETECT) ---
+def query_ai_auto(prompt, api_key):
+    if not api_key: return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
     
     try:
         genai.configure(api_key=api_key)
         
-        # Kaland Kontextus összeállítása
+        # 1. LÉPÉS: Megkeressük, mi érhető el TÉNYLEG
+        valid_models = []
+        try:
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    valid_models.append(m.name)
+        except Exception as e:
+            return f"Hiba a modellek listázásakor: {str(e)}"
+
+        if not valid_models:
+            return "⛔ HIBA: A Google fiókodhoz nem tartozik egyetlen elérhető modell sem. (Lehet, hogy a régiód tiltott?)"
+
+        # 2. LÉPÉS: Kiválasztjuk a legjobbat (Preferáljuk a 'gemini'-t)
+        # Ha van 'gemini-1.5-flash', az a nyerő. Ha nincs, bármi jó, amiben 'gemini' van.
+        chosen_model_name = next((m for m in valid_models if "gemini-1.5-flash" in m), None)
+        if not chosen_model_name:
+             chosen_model_name = next((m for m in valid_models if "gemini" in m), valid_models[0])
+
+        # 3. LÉPÉS: Válaszadás a választott modellel
         adv_context = json.dumps(st.session_state.active_adventure, ensure_ascii=False)
         inv_context = ", ".join(st.session_state.inventory)
         
@@ -48,23 +64,13 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # KIZÁRÓLAG a RÉGI 'gemini-pro' modellt használjuk.
-        # Ez a legbiztosabb, mert minden szerveren elérhető.
-        # Nem próbálkozunk Flash-el vagy 1.5-tel, mert azok okozzák a 404-et.
-        try:
-            model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-            return response.text
-            
-        except Exception as e:
-            # Ha még ez sem megy, akkor nagy baj van (pl. 429 Limit)
-            error_msg = str(e)
-            if "429" in error_msg:
-                 return "⛔ **Napi Limit Betelt!** ⛔\n\nA kereted elfogyott. Megoldás: Új kulcs egy ÚJ projektben."
-            return f"⚠️ **AI Hiba:** {error_msg}"
+        model = genai.GenerativeModel(chosen_model_name)
+        response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+        
+        return f"✅ **[{chosen_model_name}]** válasza:\n\n{response.text}"
 
     except Exception as e:
-        return f"Konfigurációs Hiba: {str(e)}"
+        return f"Kritikus Hiba ({chosen_model_name if 'chosen_model_name' in locals() else 'Ismeretlen'}): {str(e)}"
 
 def roll_dice(sides, count=1):
     rolls = [random.randint(1, sides) for _ in range(count)]
@@ -75,7 +81,6 @@ def roll_dice(sides, count=1):
 with st.sidebar:
     st.title("🛠️ DM Pult")
     
-    # --- API KULCS KEZELÉS ---
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
         st.success("🔐 Kulcs betöltve a Secrets-ből!")
@@ -86,7 +91,6 @@ with st.sidebar:
         else:
             st.success("Manuális kulcs aktív!")
 
-    # TABOK
     tab_tools, tab_init, tab_ai_settings = st.tabs(["Kocka", "Harc", "Beállítás"])
     
     with tab_tools:
@@ -128,7 +132,6 @@ with st.sidebar:
 
     st.divider()
     
-    # KINCSEK (INVENTORY)
     with st.expander("🎒 Kincsek"):
         for item in st.session_state.inventory: st.write(f"- {item}")
         new_item = st.text_input("Tárgy hozzáadása", key="new_loot_input")
@@ -161,8 +164,8 @@ with tab_chat:
             st.write(prompt)
             
         with st.chat_message("assistant"):
-            with st.spinner("Keresés..."):
-                response = query_ai_with_search(prompt, api_key)
+            with st.spinner("Modellek feltérképezése és válasz..."):
+                response = query_ai_auto(prompt, api_key)
                 st.write(response)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
 
