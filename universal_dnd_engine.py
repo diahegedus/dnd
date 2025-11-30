@@ -28,49 +28,96 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (AUTO-DETECT) ---
+# --- 3. AI MOTOR (AUTO-DETECT & HIBAKEZELÉS) ---
 def query_ai_auto(prompt, api_key):
-    if not api_key: return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
-    
+    if not api_key:
+        return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
+
     try:
         genai.configure(api_key=api_key)
-        
-        # 1. LÉPÉS: Megkeressük, mi érhető el TÉNYLEG
-        valid_models = []
+
+        # --- 1) MODELLEK LISTÁZÁSA ---
         try:
-            for m in genai.list_models():
-                if 'generateContent' in m.supported_generation_methods:
-                    valid_models.append(m.name)
+            raw_models = genai.list_models()
         except Exception as e:
-            return f"Hiba a modellek listázásakor: {str(e)}"
+            return f"⛔ Modellek listázása sikertelen: {str(e)}"
+
+        valid_models = []
+        for m in raw_models:
+            # A Google néha dict-et ad vissza, néha property-t, ezt normalizáljuk
+            methods = getattr(m, "supported_generation_methods", [])
+            if isinstance(methods, dict):
+                methods = list(methods.keys())
+
+            # Csak azokat vesszük, amik tudnak contentet generálni
+            if "generateContent" in methods:
+                valid_models.append(m.name)
 
         if not valid_models:
-            return "⛔ HIBA: A Google fiókodhoz nem tartozik egyetlen elérhető modell sem. (Lehet, hogy a régiód tiltott?)"
+            return "⛔ Nem találtam egyetlen olyan modellt sem, amely támogatná a generateContent metódust."
 
-        # 2. LÉPÉS: Kiválasztjuk a legjobbat (Preferáljuk a 'gemini'-t)
-        # Ha van 'gemini-1.5-flash', az a nyerő. Ha nincs, bármi jó, amiben 'gemini' van.
-        chosen_model_name = next((m for m in valid_models if "gemini-1.5-flash" in m), None)
-        if not chosen_model_name:
-             chosen_model_name = next((m for m in valid_models if "gemini" in m), valid_models[0])
+        # --- 2) PREFERÁLT MODELLEK (free tier kompatibilis) ---
+        # A list_models() általában "models/..." formátumot ad, ezért így keressük
+        preferred_order = [
+            "models/gemini-1.5-flash-latest",
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro-latest",
+            "models/gemini-1.5-pro",
+            "gemini-1.5-flash", # Ha esetleg prefix nélkül jönne
+            "gemini-1.5-pro",
+        ]
 
-        # 3. LÉPÉS: Válaszadás a választott modellel
+        chosen_model = None
+        for pref in preferred_order:
+            if pref in valid_models:
+                chosen_model = pref
+                break
+
+        # Ha semelyik preferált nem jó, akkor megyünk az első használhatóra
+        if not chosen_model:
+            chosen_model = valid_models[0]
+
+        # --- 3) KONTEKSTUS ÖSSZERAKÁSA ---
         adv_context = json.dumps(st.session_state.active_adventure, ensure_ascii=False)
         inv_context = ", ".join(st.session_state.inventory)
-        
+
         system_prompt = f"""
         Te egy Dungeon Master Segéd vagy.
         Források:
         1. KALAND: {adv_context}
         2. INVENTORY: {inv_context}
         """
-        
-        model = genai.GenerativeModel(chosen_model_name)
-        response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-        
-        return f"✅ **[{chosen_model_name}]** válasza:\n\n{response.text}"
+
+        # --- 4) MODEL INICIALIZÁLÁS ---
+        try:
+            model = genai.GenerativeModel(chosen_model)
+        except Exception as e:
+            return f"⛔ A modell inicializálása sikertelen ({chosen_model}): {str(e)}"
+
+        # --- 5) KÉRÉS ---
+        try:
+            response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+            return f"✅ **[{chosen_model}]** válasza:\n\n{response.text}"
+        except Exception as e:
+            # Ha quota vagy region error → emberbarát üzenet
+            err = str(e)
+
+            if "429" in err or "quota" in err.lower():
+                return (
+                    "⛔ **Quota túllépve!**\n"
+                    "Túl sok kérést küldtél a Google free tier API-ra. "
+                    "Várj néhány percet vagy hozz létre új kulcsot a Google AI Studio-ban."
+                )
+
+            if "404" in err or "not found" in err.lower():
+                return (
+                    f"⛔ **A választott modell nem érhető el ebben a régióban vagy kulccsal:** {chosen_model}"
+                )
+            
+            return f"Hiba a generálás során: {str(e)}"
 
     except Exception as e:
-        return f"Kritikus Hiba ({chosen_model_name if 'chosen_model_name' in locals() else 'Ismeretlen'}): {str(e)}"
+        return f"Váratlan hiba: {str(e)}"
 
 def roll_dice(sides, count=1):
     rolls = [random.randint(1, sides) for _ in range(count)]
