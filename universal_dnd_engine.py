@@ -28,7 +28,7 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (VÉGSŐ MENEDÉK: FLASH -> PRO) ---
+# --- 3. AI MOTOR (DINAMIKUS MODELL KERESÉS) ---
 def query_ai_with_search(prompt, api_key):
     if not api_key: return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
     try:
@@ -45,21 +45,42 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # 1. PRÓBA: 'gemini-1.5-flash' (Gyors és új)
+        # 1. PRÓBA: Standard Flash (A legjobb ingyenes)
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
             return response.text
+        except Exception:
+            pass # Ha nem megy, lépünk tovább
+
+        # 2. PRÓBA: Régi Pro
+        try:
+            model = genai.GenerativeModel('gemini-pro')
+            response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+            return response.text
+        except Exception:
+            pass # Ez se ment...
+
+        # 3. VÉGSŐ MEGOLDÁS: Amit a szerver talál
+        # Lekérjük az elérhető modellek listáját és választunk egyet
+        try:
+            available_models = []
+            for m in genai.list_models():
+                if 'generateContent' in m.supported_generation_methods:
+                    available_models.append(m.name)
             
-        except Exception as e_flash:
-            # 2. PRÓBA: Ha a Flash nem található (404) vagy hiba van...
-            try:
-                model_old = genai.GenerativeModel('gemini-pro')
-                response = model_old.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
-                return f"⚠️ *[Régi modell (gemini-pro) aktív]*\n\n{response.text}"
-            
-            except Exception as e_old:
-                return f"Kritikus AI Hiba: {str(e_old)}\n(Flash hiba: {str(e_flash)})"
+            if available_models:
+                # Keressünk egy 'gemini' nevűt a listában
+                best_model_name = next((m for m in available_models if "gemini" in m), available_models[0])
+                
+                model = genai.GenerativeModel(best_model_name)
+                response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+                return f"⚠️ [Mentőöv modell: {best_model_name}]\n{response.text}"
+            else:
+                return "❌ A rendszer nem talált egyetlen használható AI modellt sem."
+                
+        except Exception as e_fatal:
+            return f"Kritikus Hiba: {str(e_fatal)}"
 
     except Exception as e:
         return f"AI Konfigurációs Hiba: {str(e)}"
@@ -73,13 +94,11 @@ def roll_dice(sides, count=1):
 with st.sidebar:
     st.title("🛠️ DM Pult")
     
-    # --- API KULCS KEZELÉS (ÚJ: SECRETS TÁMOGATÁS) ---
-    # 1. Megnézzük, van-e a titkos tárolóban
+    # --- API KULCS KEZELÉS ---
     if "GOOGLE_API_KEY" in st.secrets:
         api_key = st.secrets["GOOGLE_API_KEY"]
         st.success("🔐 Kulcs betöltve a Secrets-ből!")
     else:
-        # 2. Ha nincs, akkor kérjük be kézzel
         api_key = st.text_input("Google API Kulcs", type="password", key="manual_api_key")
         if not api_key:
             st.warning("Nincs kulcs megadva.")
