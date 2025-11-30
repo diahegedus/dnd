@@ -28,9 +28,9 @@ if 'active_adventure' not in st.session_state: st.session_state.active_adventure
 if 'inventory' not in st.session_state: st.session_state.inventory = []
 if 'initiative' not in st.session_state: st.session_state.initiative = []
 
-# --- 3. AI MOTOR (TAKARÉKOS MÓD / STABLE) ---
+# --- 3. AI MOTOR (VÉGSŐ MENEDÉK: FLASH -> PRO) ---
 def query_ai_with_search(prompt, api_key):
-    if not api_key: return "⚠️ Nincs API kulcs! Írd be oldalt és nyomj ENTER-t!"
+    if not api_key: return "⚠️ Nincs API kulcs! Állítsd be a Secrets-ben vagy írd be oldalt!"
     try:
         genai.configure(api_key=api_key)
         
@@ -45,20 +45,21 @@ def query_ai_with_search(prompt, api_key):
         2. INVENTORY: {inv_context}
         """
         
-        # KIZÁRÓLAG a 'gemini-1.5-flash' modellt használjuk.
-        # Ez a legstabilabb és legnagyobb kerettel rendelkező ingyenes modell.
-        # Nem kísérletezünk más modellekkel, hogy elkerüljük a 429-es hibát.
+        # 1. PRÓBA: 'gemini-1.5-flash' (Gyors és új)
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
             return response.text
             
-        except Exception as e:
-            # Speciális hibaüzenet, ha a limit betelt
-            if "429" in str(e):
-                return "⛔ **Napi Limit Betelt!** ⛔\n\nA Google ingyenes kerete mára elfogyott erre a kulcsra.\n\n**Megoldás:**\n1. Menj a [Google AI Studio](https://aistudio.google.com/app/apikey) oldalra.\n2.ozz létre egy **ÚJ PROJEKTET** (New Project).\n3. Kérj abban egy új kulcsot.\n4. Írd be ide az új kulcsot."
-            else:
-                return f"AI Hiba: {str(e)}"
+        except Exception as e_flash:
+            # 2. PRÓBA: Ha a Flash nem található (404) vagy hiba van...
+            try:
+                model_old = genai.GenerativeModel('gemini-pro')
+                response = model_old.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
+                return f"⚠️ *[Régi modell (gemini-pro) aktív]*\n\n{response.text}"
+            
+            except Exception as e_old:
+                return f"Kritikus AI Hiba: {str(e_old)}\n(Flash hiba: {str(e_flash)})"
 
     except Exception as e:
         return f"AI Konfigurációs Hiba: {str(e)}"
@@ -72,8 +73,18 @@ def roll_dice(sides, count=1):
 with st.sidebar:
     st.title("🛠️ DM Pult")
     
-    # API Kulcs kezelése
-    api_key = st.session_state.get("google_api_key", "")
+    # --- API KULCS KEZELÉS (ÚJ: SECRETS TÁMOGATÁS) ---
+    # 1. Megnézzük, van-e a titkos tárolóban
+    if "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        st.success("🔐 Kulcs betöltve a Secrets-ből!")
+    else:
+        # 2. Ha nincs, akkor kérjük be kézzel
+        api_key = st.text_input("Google API Kulcs", type="password", key="manual_api_key")
+        if not api_key:
+            st.warning("Nincs kulcs megadva.")
+        else:
+            st.success("Kulcs megadva!")
 
     # 1. TABOK
     tab_tools, tab_init, tab_ai_settings = st.tabs(["Kocka", "Harc", "Beállítás"])
@@ -109,14 +120,7 @@ with st.sidebar:
                 st.rerun()
 
     with tab_ai_settings:
-        if api_key:
-            st.success("API Kulcs aktív! ✅")
-        else:
-            st.warning("Nincs megadva kulcs!")
-            
         st.markdown("[👉 Ingyenes kulcs (Google AI Studio)](https://aistudio.google.com/app/apikey)")
-        st.text_input("Google API Kulcs", type="password", key="google_api_key")
-        
         uploaded_file = st.file_uploader("Kaland JSON", type="json")
         if uploaded_file:
             st.session_state.active_adventure = json.load(uploaded_file)
@@ -159,8 +163,7 @@ with tab_chat:
             
         with st.chat_message("assistant"):
             with st.spinner("Keresés..."):
-                current_api_key = st.session_state.get("google_api_key")
-                response = query_ai_with_search(prompt, current_api_key)
+                response = query_ai_with_search(prompt, api_key)
                 st.write(response)
                 st.session_state.chat_history.append({"role": "assistant", "content": response})
 
