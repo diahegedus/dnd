@@ -218,12 +218,79 @@ with tab_chat:
 
 with tab_view:
     adv = st.session_state.active_adventure
-    st.header(adv.get("title", "Névtelen Kaland"))
-    st.write(adv.get("description", ""))
     
-    for idx, chapter in enumerate(adv.get("chapters", [])):
-        with st.expander(chapter["title"]):
-            st.markdown(f"**Leírás:** {chapter.get('text', '')}")
-            st.info(f"DM Infó: {chapter.get('dm_notes', '')}")
-            if "loot" in chapter:
-                st.success(f"Loot: {', '.join(chapter['loot'])}")
+    # 1. CÍM ÉS LEÍRÁS KEZELÉSE (Kompatibilitás az új JSON-nal)
+    # Ha van 'adventure_metadata', akkor onnan olvassa, ha nincs, akkor a gyökérből
+    if "adventure_metadata" in adv:
+        meta = adv["adventure_metadata"]
+        st.header(meta.get("title", "Névtelen Kaland"))
+        st.caption(f"Szint: {meta.get('level', '?')} | Műfaj: {meta.get('genre', '-')}")
+        st.write(meta.get("summary", ""))
+    else:
+        st.header(adv.get("title", "Névtelen Kaland"))
+        st.write(adv.get("description", ""))
+
+    st.divider()
+
+    # 2. FEJEZETEK MEGJELENÍTÉSE
+    if "chapters" in adv:
+        for chapter in adv["chapters"]:
+            # Fejezet címe
+            chap_title = chapter.get("title", "Fejezet")
+            if "id" in chapter:
+                chap_title = f"{chapter['id']}. {chap_title}"
+                
+            with st.expander(f"📖 {chap_title}"):
+                st.subheader(f"📍 Helyszín: {chapter.get('location', 'Ismeretlen')}")
+                
+                # --- A: Ha ÚJ típusú (jelenetekre bontott) JSON van ---
+                if "scenes" in chapter:
+                    for scene in chapter["scenes"]:
+                        st.markdown(f"**--- {scene.get('title', scene['type'].upper())} ---**")
+                        
+                        # Felolvasandó szöveg
+                        if "read_aloud" in scene:
+                            st.info(f"🗣️ **Felolvasandó:**\n\n{scene['read_aloud']}")
+                        
+                        # DM Infók (titkos)
+                        if "dm_notes" in scene:
+                            st.error(f"🕵️ **DM Info:** {scene['dm_notes']}")
+
+                        # Tutorial tippek
+                        if "tutorial_tip" in scene:
+                            st.caption(f"💡 *Tipp:* {scene['tutorial_tip']}")
+
+                        # Mechanika / Dobások / Ellenségek
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if "mechanics" in scene:
+                                st.warning(f"⚙️ **Mechanika:** {scene['mechanics']}")
+                            if "check" in scene:
+                                st.write(f"🎲 **Próba:** {scene['check']}")
+                        with c2:
+                            if "enemies" in scene:
+                                st.write("⚔️ **Ellenségek:**")
+                                for enemy in scene["enemies"]:
+                                    # Kezeljük, ha string vagy ha objektum az enemy
+                                    if isinstance(enemy, dict):
+                                        st.code(f"{enemy.get('name')} (x{enemy.get('count', 1)})")
+                                    else:
+                                        st.code(str(enemy))
+
+                        # Handoutok
+                        if "handout" in scene:
+                            h = scene["handout"]
+                            st.success(f"📩 **Handout:** {h.get('title', '')}\n\n*{h.get('text', '')}*")
+                        
+                        st.write("") # Üres sor a jelenetek közé
+
+                # --- B: Ha RÉGI típusú (egyszerű szöveges) JSON van ---
+                else:
+                    st.markdown(chapter.get('text', ''))
+                    if 'dm_notes' in chapter:
+                        st.info(f"DM Infó: {chapter['dm_notes']}")
+                    if "loot" in chapter:
+                        st.success(f"Loot: {', '.join(chapter['loot'])}")
+
+    else:
+        st.warning("Ez a kalandfájl nem tartalmaz fejezeteket.")
