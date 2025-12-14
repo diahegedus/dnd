@@ -44,40 +44,38 @@ def query_ai_auto(prompt, api_key):
 
         valid_models = []
         for m in raw_models:
-            # A Google néha dict-et ad vissza, néha property-t, ezt normalizáljuk
             methods = getattr(m, "supported_generation_methods", [])
             if isinstance(methods, dict):
                 methods = list(methods.keys())
 
-            # Csak azokat vesszük, amik tudnak contentet generálni
             if "generateContent" in methods:
                 valid_models.append(m.name)
 
         if not valid_models:
             return "⛔ Nem találtam egyetlen olyan modellt sem, amely támogatná a generateContent metódust."
 
-        # --- 2) PREFERÁLT MODELLEK (free tier kompatibilis) ---
-        # A list_models() általában "models/..." formátumot ad, ezért így keressük
+        # --- 2) PREFERÁLT MODELLEK ---
         preferred_order = [
-            "models/gemini-1.5-flash-latest",
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-pro-latest",
-            "models/gemini-1.5-pro",
-            "gemini-1.5-flash", # Ha esetleg prefix nélkül jönne
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro-latest",
             "gemini-1.5-pro",
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
         ]
 
         chosen_model = None
         for pref in preferred_order:
-            if pref in valid_models:
+            if pref in valid_models or f"models/{pref}" in valid_models:
                 chosen_model = pref
+                if f"models/{pref}" in valid_models:
+                    chosen_model = f"models/{pref}"
                 break
 
-        # Ha semelyik preferált nem jó, akkor megyünk az első használhatóra
         if not chosen_model:
             chosen_model = valid_models[0]
 
-        # --- 3) KONTEKSTUS ÖSSZERAKÁSA ---
+        # --- 3) KONTEKSTUS ---
         adv_context = json.dumps(st.session_state.active_adventure, ensure_ascii=False)
         inv_context = ", ".join(st.session_state.inventory)
 
@@ -99,30 +97,39 @@ def query_ai_auto(prompt, api_key):
             response = model.generate_content(f"{system_prompt}\n\nKÉRDÉS: {prompt}")
             return f"✅ **[{chosen_model}]** válasza:\n\n{response.text}"
         except Exception as e:
-            # Ha quota vagy region error → emberbarát üzenet
             err = str(e)
-
             if "429" in err or "quota" in err.lower():
-                return (
-                    "⛔ **Quota túllépve!**\n"
-                    "Túl sok kérést küldtél a Google free tier API-ra. "
-                    "Várj néhány percet vagy hozz létre új kulcsot a Google AI Studio-ban."
-                )
-
+                return "⛔ **Quota túllépve!**\nVárj néhány percet vagy hozz létre új kulcsot."
             if "404" in err or "not found" in err.lower():
-                return (
-                    f"⛔ **A választott modell nem érhető el ebben a régióban vagy kulccsal:** {chosen_model}"
-                )
-            
+                return f"⛔ **A választott modell nem érhető el:** {chosen_model}"
             return f"Hiba a generálás során: {str(e)}"
 
     except Exception as e:
         return f"Váratlan hiba: {str(e)}"
 
-def roll_dice(sides, count=1):
+# --- KIBŐVÍTETT KOCKADOBÓ FÜGGVÉNY ---
+def roll_dice(sides, count=1, modifier=0):
     rolls = [random.randint(1, sides) for _ in range(count)]
-    total = sum(rolls)
-    st.session_state.dice_log.insert(0, f"{count}d{sides} ➔ {total}")
+    total = sum(rolls) + modifier
+    
+    timestamp = datetime.now().strftime("%H:%M")
+    mod_text = f" + {modifier}" if modifier != 0 else ""
+    roll_details = ", ".join(map(str, rolls))
+    
+    # Különleges üzenet kritikus dobáshoz (csak d20-nál)
+    crit_msg = ""
+    if sides == 20 and count == 1:
+        if rolls[0] == 20: crit_msg = " 🔥 KRITIKUS!"
+        if rolls[0] == 1: crit_msg = " 💀 BALSORS!"
+
+    log_entry = f"**{timestamp}** | {count}d{sides}{mod_text} ➔ [{roll_details}] = **{total}**{crit_msg}"
+    
+    # Hozzáadjuk a listához (elejére, hogy a legfrissebb legyen felül)
+    st.session_state.dice_log.insert(0, log_entry)
+    
+    # Csak az utolsó 5-öt tartjuk meg (a listát vágjuk)
+    if len(st.session_state.dice_log) > 5:
+        st.session_state.dice_log = st.session_state.dice_log[:5]
 
 # --- 4. OLDALSÁV (DM TOOLS) ---
 with st.sidebar:
@@ -140,13 +147,40 @@ with st.sidebar:
 
     tab_tools, tab_init, tab_ai_settings = st.tabs(["Kocka", "Harc", "Beállítás"])
     
+    # --- KIBŐVÍTETT KOCKA TAB ---
     with tab_tools:
         st.subheader("🎲 Kockadobó")
-        c1, c2, c3 = st.columns(3)
-        if c1.button("d6", key="d6_btn"): roll_dice(6)
-        if c2.button("d8", key="d8_btn"): roll_dice(8)
-        if c3.button("d20", key="d20_btn"): roll_dice(20)
-        for log in st.session_state.dice_log[:5]: st.caption(log)
+        
+        # Beállítások egy sorban
+        c_count, c_mod = st.columns(2)
+        count = c_count.number_input("Db", min_value=1, value=1, step=1, key="dice_count")
+        mod = c_mod.number_input("Mod (+/-)", value=0, step=1, key="dice_mod")
+        
+        st.write("Válassz kockát:")
+        
+        # Első sor (kisebb kockák)
+        c1, c2, c3, c4 = st.columns(4)
+        if c1.button("d4", use_container_width=True): roll_dice(4, count, mod)
+        if c2.button("d6", use_container_width=True): roll_dice(6, count, mod)
+        if c3.button("d8", use_container_width=True): roll_dice(8, count, mod)
+        if c4.button("d10", use_container_width=True): roll_dice(10, count, mod)
+        
+        # Második sor (nagyobb kockák)
+        c5, c6, c7 = st.columns(3)
+        if c5.button("d12", use_container_width=True): roll_dice(12, count, mod)
+        if c6.button("d20", use_container_width=True): roll_dice(20, count, mod)
+        if c7.button("d100", use_container_width=True): roll_dice(100, count, mod)
+        
+        st.divider()
+        st.caption("📜 Utolsó 5 dobás:")
+        
+        # Napló megjelenítése
+        if st.session_state.dice_log:
+            for log in st.session_state.dice_log:
+                st.markdown(log)
+        else:
+            st.info("Még nem történt dobás.")
+            
         if st.button("Napló Törlése", key="clear_log"): 
             st.session_state.dice_log = []
             st.rerun()
@@ -218,79 +252,12 @@ with tab_chat:
 
 with tab_view:
     adv = st.session_state.active_adventure
+    st.header(adv.get("title", "Névtelen Kaland"))
+    st.write(adv.get("description", ""))
     
-    # 1. CÍM ÉS LEÍRÁS KEZELÉSE (Kompatibilitás az új JSON-nal)
-    # Ha van 'adventure_metadata', akkor onnan olvassa, ha nincs, akkor a gyökérből
-    if "adventure_metadata" in adv:
-        meta = adv["adventure_metadata"]
-        st.header(meta.get("title", "Névtelen Kaland"))
-        st.caption(f"Szint: {meta.get('level', '?')} | Műfaj: {meta.get('genre', '-')}")
-        st.write(meta.get("summary", ""))
-    else:
-        st.header(adv.get("title", "Névtelen Kaland"))
-        st.write(adv.get("description", ""))
-
-    st.divider()
-
-    # 2. FEJEZETEK MEGJELENÍTÉSE
-    if "chapters" in adv:
-        for chapter in adv["chapters"]:
-            # Fejezet címe
-            chap_title = chapter.get("title", "Fejezet")
-            if "id" in chapter:
-                chap_title = f"{chapter['id']}. {chap_title}"
-                
-            with st.expander(f"📖 {chap_title}"):
-                st.subheader(f"📍 Helyszín: {chapter.get('location', 'Ismeretlen')}")
-                
-                # --- A: Ha ÚJ típusú (jelenetekre bontott) JSON van ---
-                if "scenes" in chapter:
-                    for scene in chapter["scenes"]:
-                        st.markdown(f"**--- {scene.get('title', scene['type'].upper())} ---**")
-                        
-                        # Felolvasandó szöveg
-                        if "read_aloud" in scene:
-                            st.info(f"🗣️ **Felolvasandó:**\n\n{scene['read_aloud']}")
-                        
-                        # DM Infók (titkos)
-                        if "dm_notes" in scene:
-                            st.error(f"🕵️ **DM Info:** {scene['dm_notes']}")
-
-                        # Tutorial tippek
-                        if "tutorial_tip" in scene:
-                            st.caption(f"💡 *Tipp:* {scene['tutorial_tip']}")
-
-                        # Mechanika / Dobások / Ellenségek
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if "mechanics" in scene:
-                                st.warning(f"⚙️ **Mechanika:** {scene['mechanics']}")
-                            if "check" in scene:
-                                st.write(f"🎲 **Próba:** {scene['check']}")
-                        with c2:
-                            if "enemies" in scene:
-                                st.write("⚔️ **Ellenségek:**")
-                                for enemy in scene["enemies"]:
-                                    # Kezeljük, ha string vagy ha objektum az enemy
-                                    if isinstance(enemy, dict):
-                                        st.code(f"{enemy.get('name')} (x{enemy.get('count', 1)})")
-                                    else:
-                                        st.code(str(enemy))
-
-                        # Handoutok
-                        if "handout" in scene:
-                            h = scene["handout"]
-                            st.success(f"📩 **Handout:** {h.get('title', '')}\n\n*{h.get('text', '')}*")
-                        
-                        st.write("") # Üres sor a jelenetek közé
-
-                # --- B: Ha RÉGI típusú (egyszerű szöveges) JSON van ---
-                else:
-                    st.markdown(chapter.get('text', ''))
-                    if 'dm_notes' in chapter:
-                        st.info(f"DM Infó: {chapter['dm_notes']}")
-                    if "loot" in chapter:
-                        st.success(f"Loot: {', '.join(chapter['loot'])}")
-
-    else:
-        st.warning("Ez a kalandfájl nem tartalmaz fejezeteket.")
+    for idx, chapter in enumerate(adv.get("chapters", [])):
+        with st.expander(chapter["title"]):
+            st.markdown(f"**Leírás:** {chapter.get('text', '')}")
+            st.info(f"DM Infó: {chapter.get('dm_notes', '')}")
+            if "loot" in chapter:
+                st.success(f"Loot: {', '.join(chapter['loot'])}")
