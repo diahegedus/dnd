@@ -252,12 +252,102 @@ with tab_chat:
 
 with tab_view:
     adv = st.session_state.active_adventure
-    st.header(adv.get("title", "Névtelen Kaland"))
-    st.write(adv.get("description", ""))
     
-    for idx, chapter in enumerate(adv.get("chapters", [])):
-        with st.expander(chapter["title"]):
-            st.markdown(f"**Leírás:** {chapter.get('text', '')}")
-            st.info(f"DM Infó: {chapter.get('dm_notes', '')}")
-            if "loot" in chapter:
-                st.success(f"Loot: {', '.join(chapter['loot'])}")
+    # 1. CÍM ÉS ADATOK MEGJELENÍTÉSE
+    # Az új JSON-ban a cím az 'adventure_metadata'-ban van
+    if "adventure_metadata" in adv:
+        meta = adv["adventure_metadata"]
+        st.header(meta.get("title", "Névtelen Kaland"))
+        st.caption(f"Szint: {meta.get('level', '?')} | Műfaj: {meta.get('genre', '-')}")
+        st.write(meta.get("summary", ""))
+    # Ha régi típusú fájl, akkor a gyökérből olvassuk
+    else:
+        st.header(adv.get("title", "Névtelen Kaland"))
+        st.write(adv.get("description", ""))
+
+    st.divider()
+
+    # 2. FEJEZETEK MEGJELENÍTÉSE
+    if "chapters" in adv:
+        for chapter in adv["chapters"]:
+            # Cím formázása
+            chap_title = chapter.get("title", "Fejezet")
+            if "id" in chapter:
+                chap_title = f"{chapter['id']}. {chap_title}"
+                
+            with st.expander(f"📖 {chap_title}"):
+                st.subheader(f"📍 Helyszín: {chapter.get('location', 'Ismeretlen')}")
+                
+                # === A: ÚJ TÍPUS (Jelenetek / Scenes) ===
+                if "scenes" in chapter:
+                    for scene in chapter["scenes"]:
+                        st.markdown("---") # Elválasztó vonal
+                        
+                        # Jelenet címe és típusa
+                        scene_name = scene.get('title', 'Névtelen Jelenet')
+                        scene_type = scene.get('type', 'scene').upper()
+                        st.markdown(f"#### {scene_type}: {scene_name}")
+
+                        # 1. Felolvasandó szöveg (Kék doboz)
+                        if "read_aloud" in scene:
+                            st.info(f"🗣️ **Felolvasandó:**\n\n{scene['read_aloud']}")
+                        
+                        # 2. DM Infók (Piros doboz)
+                        if "dm_notes" in scene:
+                            st.error(f"🕵️ **DM Info:** {scene['dm_notes']}")
+
+                        # 3. Tutorial tippek (Szürke szöveg)
+                        if "tutorial_tip" in scene:
+                            st.caption(f"💡 *Tipp:* {scene['tutorial_tip']}")
+
+                        # 4. Mechanika és Ellenségek (Két oszlop)
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if "mechanics" in scene:
+                                st.warning(f"⚙️ **Szabályok:**\n\n{scene['mechanics']}")
+                            if "check" in scene:
+                                st.write(f"🎲 **Próba:** {scene['check']}")
+                            if "options" in scene: # Behatolási opciók kezelése
+                                st.write("Szabály opciók:")
+                                for opt in scene['options']:
+                                    st.write(f"- **{opt['method']}**: {opt['check']}")
+                        
+                        with c2:
+                            if "enemies" in scene:
+                                st.write("⚔️ **Ellenségek:**")
+                                for enemy in scene["enemies"]:
+                                    if isinstance(enemy, dict):
+                                        st.code(f"{enemy.get('name')} (x{enemy.get('count', 1)})\n{enemy.get('stat_block', '')}")
+                                    else:
+                                        st.code(str(enemy))
+                            if "environment_effects" in scene:
+                                st.write("🌪️ **Környezeti Hatások:**")
+                                for eff in scene["environment_effects"]:
+                                    st.write(f"- d4={eff['roll']}: {eff['name']} ({eff['effect']})")
+
+                        # 5. Handoutok
+                        if "handout" in scene:
+                            h = scene["handout"]
+                            st.success(f"📩 **Handout:** {h.get('title', '')}\n\n*{h.get('text', '')}*")
+                        
+                        # 6. Loot / Zsákmány
+                        if "loot" in scene:
+                            # Ellenőrzés, hogy lista-e vagy szöveg
+                            loot_data = scene['loot']
+                            if isinstance(loot_data, list):
+                                st.success(f"💰 **Zsákmány:** {', '.join(loot_data)}")
+                            else:
+                                st.success(f"💰 **Zsákmány:** {loot_data}")
+
+                # === B: RÉGI TÍPUS (Egyszerű szöveg) ===
+                # Ez a biztonsági tartalék, ha régi fájlt töltesz be
+                else:
+                    if 'text' in chapter:
+                        st.markdown(chapter['text'])
+                    if 'dm_notes' in chapter:
+                        st.error(f"DM Infó: {chapter['dm_notes']}")
+                    if "loot" in chapter:
+                        st.success(f"Loot: {', '.join(chapter['loot'])}")
+
+    else:
+        st.warning("Ez a kalandfájl nem tartalmaz fejezeteket.")
