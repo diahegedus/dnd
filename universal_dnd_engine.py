@@ -145,49 +145,7 @@ with st.sidebar:
         else:
             st.success("Manuális kulcs aktív!")
 
-    tab_tools, tab_init, tab_ai_settings = st.tabs(["Kocka", "Harc", "Beállítás"])
-    # ... a tab_init belsejében ...
-st.subheader("⚔️ Kezdeményezés & HP")
-c_n, c_v, c_hp = st.columns([2, 1, 1])
-n = c_n.text_input("Név", key="init_name")
-v = c_v.number_input("Init", key="init_val", value=0)
-hp = c_hp.number_input("Max HP", key="init_hp", value=10)
-
-if st.button("Hozzáad", key="add_init"):
-    st.session_state.initiative.append({
-        "n": n, "v": v, "hp": hp, "max_hp": hp, "conditions": []
-    })
-    st.session_state.initiative.sort(key=lambda x: x['v'], reverse=True)
-    st.rerun()
-
-st.divider()
-
-# Lista megjelenítése szerkeszthető HP-val
-for idx, item in enumerate(st.session_state.initiative):
-    cols = st.columns([0.5, 2, 1.5, 1.5, 0.5]) # Init, Név, HP, Művelet, Törlés
-    cols[0].write(f"**{item['v']}**")
-    cols[1].write(f"**{item['n']}**")
-    
-    # HP Bar vizualizáció (színváltós)
-    hp_percent = max(0, min(1.0, item['hp'] / item['max_hp'])) if item['max_hp'] > 0 else 0
-    bar_color = "red" if hp_percent < 0.3 else "orange" if hp_percent < 0.6 else "green"
-    cols[1].progress(hp_percent, text=f"{item['hp']} / {item['max_hp']} HP")
-
-    # HP Módosítás
-    dmg = cols[2].number_input("Mód", key=f"dmg_{idx}", value=0, label_visibility="collapsed")
-    
-    bt_cols = cols[3].columns(2)
-    if bt_cols[0].button("🩸", key=f"hit_{idx}", help="Sebzés"):
-        item['hp'] -= dmg
-        st.rerun()
-    if bt_cols[1].button("💚", key=f"heal_{idx}", help="Gyógyítás"):
-        item['hp'] = min(item['max_hp'], item['hp'] + dmg)
-        st.rerun()
-
-    if cols[4].button("🗑️", key=f"del_{idx}"):
-        st.session_state.initiative.pop(idx)
-        st.rerun()
-    
+    tab_tools, tab_init, tab_ai_settings = st.tabs(["Kocka", "Harc", "Beállítás"])    
     # --- KIBŐVÍTETT KOCKA TAB ---
     with tab_tools:
         st.subheader("🎲 Kockadobó")
