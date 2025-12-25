@@ -185,7 +185,7 @@ with st.sidebar:
             st.session_state.dice_log = []
             st.rerun()
 
-    # --- ÚJ HARC ÉS HP TAB (Ez okozta a hibát, itt a javított verzió) ---
+    # --- ÚJ HARC ÉS HP TAB ---
     with tab_init:
         st.subheader("⚔️ Kezdeményezés & HP")
         
@@ -211,7 +211,7 @@ with st.sidebar:
             st.caption("A lista jelenleg üres.")
             
         for idx, item in enumerate(st.session_state.initiative):
-            # Adatmigráció biztosítása (ha régi adat maradt bent)
+            # Adatmigráció (ha régi adat maradt bent)
             if "hp" not in item: item["hp"] = 10
             if "max_hp" not in item: item["max_hp"] = 10
 
