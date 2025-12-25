@@ -184,25 +184,71 @@ with st.sidebar:
             st.session_state.dice_log = []
             st.rerun()
 
-    with tab_init:
-        st.subheader("⚔️ Kezdeményezés")
-        c_n, c_v = st.columns([2, 1])
-        n = c_n.text_input("Név", key="init_name")
-        v = c_v.number_input("Érték", key="init_val", value=0, step=1)
+   with tab_init:
+        st.subheader("⚔️ Kezdeményezés & HP")
         
-        if st.button("Hozzáad", key="add_init"):
-            st.session_state.initiative.append({"n": n, "v": v})
+        # 1. Új harcos hozzáadása (Most már HP-t is kérünk)
+        c_n, c_v, c_hp = st.columns([1.5, 1, 1])
+        n = c_n.text_input("Név", key="new_init_name")
+        v = c_v.number_input("Init", value=0, step=1, key="new_init_val")
+        hp = c_hp.number_input("HP", value=10, step=1, key="new_init_hp")
+        
+        if st.button("Hozzáad", key="add_init_btn"):
+            # Hozzáadjuk a listához a HP adatokkal együtt
+            st.session_state.initiative.append({
+                "n": n if n else "Ismeretlen", 
+                "v": v, 
+                "hp": hp, 
+                "max_hp": hp
+            })
+            # Sorrendezés kezdeményezés szerint csökkenő sorrendben
             st.session_state.initiative.sort(key=lambda x: x['v'], reverse=True)
             st.rerun()
             
         st.divider()
+
+        # Ha üres a lista
+        if not st.session_state.initiative:
+            st.caption("A lista jelenleg üres.")
+            
+        # 2. Lista megjelenítése
         for idx, item in enumerate(st.session_state.initiative):
-            cols = st.columns([3, 1])
-            cols[0].write(f"**{item['v']}** - {item['n']}")
-            if cols[1].button("X", key=f"del_init_{idx}"):
+            # Biztonsági ellenőrzés: ha régi adat maradt bent HP nélkül, pótoljuk
+            if "hp" not in item: item["hp"] = 10
+            if "max_hp" not in item: item["max_hp"] = 10
+
+            # Két soros megjelenítés egy elemhez, hogy elférjen a sidebaron
+            # Felső sor: Init érték és Név
+            c_top1, c_top2, c_del = st.columns([0.5, 2.5, 0.5])
+            c_top1.write(f"**{item['v']}**")
+            c_top2.write(f"**{item['n']}**")
+            
+            # Törlés gomb (jobb felül)
+            if c_del.button("🗑️", key=f"del_{idx}"):
                 st.session_state.initiative.pop(idx)
                 st.rerun()
 
+            # Alsó sor: HP csík és sebzés gombok
+            hp_percent = max(0.0, min(1.0, item['hp'] / item['max_hp'])) if item['max_hp'] > 0 else 0.0
+            
+            # Színválasztás HP alapján (zöld -> sárga -> piros)
+            bar_color = "red" if hp_percent < 0.3 else "orange" if hp_percent < 0.6 else "green"
+            
+            st.progress(hp_percent, text=f"HP: {item['hp']} / {item['max_hp']}")
+            
+            # Sebzés / Gyógyítás vezérlők
+            c_dmg_input, c_btn1, c_btn2 = st.columns([1, 1, 1])
+            dmg_val = c_dmg_input.number_input("Mennyiség", min_value=1, value=1, key=f"dmg_val_{idx}", label_visibility="collapsed")
+            
+            if c_btn1.button("🩸 Sebzés", key=f"hit_{idx}"):
+                item['hp'] = max(0, item['hp'] - dmg_val)
+                st.rerun()
+                
+            if c_btn2.button("💚 Gyógy", key=f"heal_{idx}"):
+                item['hp'] = min(item['max_hp'], item['hp'] + dmg_val)
+                st.rerun()
+            
+            st.markdown("---") # Elválasztó vonal a karakterek között
     with tab_ai_settings:
         st.markdown("[👉 Ingyenes kulcs (Google AI Studio)](https://aistudio.google.com/app/apikey)")
         uploaded_file = st.file_uploader("Kaland JSON", type="json")
