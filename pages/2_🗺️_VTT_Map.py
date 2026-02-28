@@ -25,6 +25,9 @@ if uploaded_file is not None:
     aspect_ratio = height / width
     canvas_width = 800  # Fix szélesség a jó UI élményért
     canvas_height = int(canvas_width * aspect_ratio)
+    
+    # ÚJ SOR: Lekicsinyítjük a képet a böngésző számára, így megszűnik a "fehér doboz" hiba!
+    bg_image = bg_image.resize((canvas_width, canvas_height))
 
     # ==========================================
     # 2. VTT ESZKÖZTÁR (Oldalsáv)
