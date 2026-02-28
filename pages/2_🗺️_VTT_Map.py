@@ -11,13 +11,17 @@ uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg",
 
 if uploaded_file is not None:
     try:
-        # Kép megnyitása és azonnali kicsinyítése a sebességért
+        # Kép megnyitása és az átlátszó rétegek eltávolítása (memóriavédelem)
         bg_image = Image.open(uploaded_file).convert("RGB")
-        bg_image.thumbnail((800, 800), Image.Resampling.LANCZOS)
         
-        # Pontos méretek lekérése a vászonhoz
-        canvas_width = bg_image.width
-        canvas_height = bg_image.height
+        # Brutális optimalizálás a Streamlit Cloud 1GB RAM limitje miatt!
+        # Fix 650 pixel szélességre nyomjuk össze az asztalt.
+        canvas_width = 650
+        aspect_ratio = bg_image.height / bg_image.width
+        canvas_height = int(canvas_width * aspect_ratio)
+        
+        # A kép átméretezése pontosan a vászon méretére
+        bg_image = bg_image.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
         
     except Exception as e:
         st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
@@ -53,12 +57,9 @@ if uploaded_file is not None:
         stroke_color = st.sidebar.color_picker("Vonal Színe", "#FFFF00")
         fill_color = "rgba(0, 0, 0, 0)"
 
-    # --- DEBUG SZEKCIÓ ---
-    st.markdown("### 🔍 Debug (Teszt)")
-    st.image(bg_image, caption="Ha ezt a képet látod, a Python sikeresen feldolgozta a térképet!")
-    st.divider()
-
     st.markdown("### 🎲 Asztal (Canvas)")
+    
+    # STATIKUS KULCS: Ez akadályozza meg, hogy a memóriában feltorlódjanak a vásznak!
     canvas_result = st_canvas(
         fill_color=fill_color,
         stroke_width=stroke_width,
@@ -68,7 +69,7 @@ if uploaded_file is not None:
         height=canvas_height,
         width=canvas_width,
         drawing_mode=drawing_mode,
-        key=f"vtt_{uploaded_file.name}",
+        key="vtt_combat_canvas", 
     )
 
 else:
