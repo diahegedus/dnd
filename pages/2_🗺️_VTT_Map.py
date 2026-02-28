@@ -14,7 +14,7 @@ uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg",
 
 if uploaded_file is not None:
     # Kép betöltése PIL segítségével
-    bg_image = Image.open(uploaded_file)
+    bg_image = Image.open(uploaded_file).convert("RGB")
     
     # Eredeti képarány megtartása a vászonhoz
     width, height = bg_image.size
