@@ -1,38 +1,55 @@
 import streamlit as st
-from streamlit_drawable_canvas import st_canvas
+import base64
+from io import BytesIO
 from PIL import Image
 
+# ==========================================
+# 0. A SENIOR TRÜKK: MONKEY PATCHING
+# ==========================================
+# Kijátsszuk a Streamlit Cloud 404-es hálózati hibáját. 
+# Felülírjuk a Streamlit belső kép-generálóját, hogy link helyett 
+# egyenesen Base64 kódként ágyazza be a térképet a böngészőbe!
+import streamlit.elements.image as st_image
+
+def patched_image_to_url(image, *args, **kwargs):
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
+# A Varázslat: Lecseréljük az eredeti függvényt a miénkre
+st_image.image_to_url = patched_image_to_url
+
+# Csak a fenti csere UTÁN szabad importálni a canvast!
+from streamlit_drawable_canvas import st_canvas
+
+# ==========================================
+# INNENTŐL A MEGSZOKOTT KÓD
+# ==========================================
 st.set_page_config(page_title="VTT Map", page_icon="🗺️", layout="wide")
 st.title("🗺️ VTT Térkép és Háború Ködje")
 
-st.markdown("Töltsd fel a harctéri térképet (akár nagy felbontásút is!), majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
+st.markdown("Töltsd fel a harctéri térképet, majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
 
 uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
     with st.spinner("Térkép varázslása az asztalra..."):
         try:
-            # Kép betöltése és RGB konverzió (a fekete hátterek ellen)
             bg_image = Image.open(uploaded_file).convert("RGB")
             
-            # 1. Kiszámoljuk a pontos méretarányokat
             orig_width, orig_height = bg_image.size
             aspect_ratio = orig_height / orig_width
             
-            canvas_width = 800  # Fix asztal szélesség
+            canvas_width = 800
             canvas_height = int(canvas_width * aspect_ratio)
             
-            # 2. SENIOR TRÜKK: Hajszálpontosan a vászonra méretezzük a képet!
-            # Így 0 memóriapazarlás lesz, a feltöltés pedig villámgyors.
             bg_image = bg_image.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
             
         except Exception as e:
             st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
             st.stop()
 
-    # ==========================================
-    # 2. VTT ESZKÖZTÁR (Oldalsáv)
-    # ==========================================
     st.sidebar.header("🛠️ VTT Eszköztár")
     
     drawing_mode = st.sidebar.selectbox(
@@ -67,13 +84,8 @@ if uploaded_file is not None:
         stroke_color = st.sidebar.color_picker("Vonal Színe", "#FFFF00")
         fill_color = "rgba(0, 0, 0, 0)"
 
-    # ==========================================
-    # 3. INTERAKTÍV VÁSZON (Canvas)
-    # ==========================================
     st.markdown("### 🎲 Asztal")
     
-    # 3. SENIOR TRÜKK: Dinamikus kulcs a fájlnévből!
-    # Így a rendszer nem használja az előző, elrontott fehér "cache-t".
     canvas_key = f"vtt_{uploaded_file.name}"
     
     canvas_result = st_canvas(
