@@ -11,16 +11,12 @@ uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg",
 
 if uploaded_file is not None:
     try:
-        # Kép megnyitása és az átlátszó rétegek eltávolítása (memóriavédelem)
         bg_image = Image.open(uploaded_file).convert("RGB")
         
-        # Brutális optimalizálás a Streamlit Cloud 1GB RAM limitje miatt!
-        # Fix 650 pixel szélességre nyomjuk össze az asztalt.
-        canvas_width = 650
+        canvas_width = 800
         aspect_ratio = bg_image.height / bg_image.width
         canvas_height = int(canvas_width * aspect_ratio)
         
-        # A kép átméretezése pontosan a vászon méretére
         bg_image = bg_image.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
         
     except Exception as e:
@@ -59,7 +55,6 @@ if uploaded_file is not None:
 
     st.markdown("### 🎲 Asztal (Canvas)")
     
-    # STATIKUS KULCS: Ez akadályozza meg, hogy a memóriában feltorlódjanak a vásznak!
     canvas_result = st_canvas(
         fill_color=fill_color,
         stroke_width=stroke_width,
