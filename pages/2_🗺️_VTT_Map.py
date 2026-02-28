@@ -14,7 +14,7 @@ if "cached_map_image" not in st.session_state:
 # 1. TÉRKÉP FELTÖLTÉSE
 # ==========================================
 st.markdown("Töltsd fel a harctéri térképet (JPG vagy PNG), majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
-
+bg_image = Image.open(uploaded_file).convert("RGB")
 uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
