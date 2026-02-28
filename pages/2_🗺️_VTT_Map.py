@@ -1,9 +1,14 @@
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
 from PIL import Image
+from io import BytesIO
 
 st.set_page_config(page_title="VTT Map", page_icon="🗺️", layout="wide")
 st.title("🗺️ VTT Térkép és Háború Ködje")
+
+# Session state inicializálása a cache-elt képhez
+if "cached_map_image" not in st.session_state:
+    st.session_state.cached_map_image = None
 
 # ==========================================
 # 1. TÉRKÉP FELTÖLTÉSE
@@ -13,8 +18,22 @@ st.markdown("Töltsd fel a harctéri térképet (JPG vagy PNG), majd használd a
 uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
-    # Kép betöltése PIL segítségével
-    bg_image = Image.open(uploaded_file).convert("RGB")
+    try:
+        # Kép betöltése PIL segítségével
+        bg_image = Image.open(uploaded_file).convert("RGB")
+        
+        # PIL kép BytesIO-ba konvertálása az st_canvas-nak (cache-elve session state-ben)
+        if st.session_state.cached_map_image is None:
+            img_io = BytesIO()
+            bg_image.save(img_io, format='PNG')
+            img_io.seek(0)
+            st.session_state.cached_map_image = img_io
+        else:
+            img_io = st.session_state.cached_map_image
+            img_io.seek(0)  # Reset stream position
+    except Exception as e:
+        st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
+        st.stop()
     
     # Eredeti képarány megtartása a vászonhoz
     width, height = bg_image.size
@@ -45,17 +64,18 @@ if uploaded_file is not None:
     # Intelligens színválasztó a funkció alapján
     if drawing_mode in ["rect", "polygon"]:
         st.sidebar.info("Tipp: Rajzolj formákat a szobák letakarásához (Fog of War).")
-        stroke_color = "#000000" # Fekete keret
-        fill_color = "rgba(0, 0, 0, 1.0)" # Teljesen fekete kitöltés
+        stroke_color = "#000000"
+        fill_color = "rgba(0, 0, 0, 1.0)"
     elif drawing_mode == "circle":
         st.sidebar.info("Tipp: AoE varázslat. Félig átlátszó piros kör.")
         stroke_color = "#FF0000"
-        fill_color = "rgba(255, 0, 0, 0.3)" # Átlátszó piros
+        fill_color = "rgba(255, 0, 0, 0.3)"
     elif drawing_mode == "transform":
         st.sidebar.info("Tipp: Kattints egy letakart szobára, majd nyomd meg a **Delete / Backspace** gombot a billentyűzeten a felfedéshez!")
         stroke_color = "#000000"
-        fill_color = "rgba(0,0,0,0)"
-    else:
+        fill_color = "rgba(0, 0, 0, 0)"
+    else:  # freedraw, line
+        st.sidebar.info("Tipp: Szabadkézi rajz vagy vonal meghúzása a térképen.")
         stroke_color = st.sidebar.color_picker("Vonal Színe", "#FFFF00")
         fill_color = "rgba(0, 0, 0, 0)"
 
@@ -69,7 +89,7 @@ if uploaded_file is not None:
         fill_color=fill_color,
         stroke_width=stroke_width,
         stroke_color=stroke_color,
-        background_image=bg_image,
+        background_image=img_io,
         update_streamlit=True,
         height=canvas_height,
         width=canvas_width,
@@ -83,5 +103,3 @@ if uploaded_file is not None:
 
 else:
     st.info("Kérlek, tölts fel egy térképet a kezdéshez! 🗺️")
-    # Opcionális: Egy kis placeholder vizualizáció üres asztalhoz
-    #
