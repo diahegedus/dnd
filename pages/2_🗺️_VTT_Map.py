@@ -5,34 +5,30 @@ from PIL import Image
 st.set_page_config(page_title="VTT Map", page_icon="🗺️", layout="wide")
 st.title("🗺️ VTT Térkép és Háború Ködje")
 
-# ==========================================
-# 1. TÉRKÉP FELTÖLTÉSE ÉS OKOS TÖMÖRÍTÉSE
-# ==========================================
 st.markdown("Töltsd fel a harctéri térképet (akár nagy felbontásút is!), majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
 
 uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
-    with st.spinner("Térkép feldolgozása az asztalra..."):
+    with st.spinner("Térkép varázslása az asztalra..."):
         try:
-            # Kép betöltése és RGB konverzió
+            # Kép betöltése és RGB konverzió (a fekete hátterek ellen)
             bg_image = Image.open(uploaded_file).convert("RGB")
             
-            # --- A SENIOR TRÜKK: AUTOMATIKUS MÉRETEZÉS ---
-            # Ha a kép gigantikus, visszaméretezzük egy biztonságos, de szép felbontásra (max 1600x1600)
-            # A thumbnail() megtartja a tökéletes képarányt, és a LANCZOS adja a legszebb minőséget.
-            max_size = (1600, 1600)
-            bg_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            # 1. Kiszámoljuk a pontos méretarányokat
+            orig_width, orig_height = bg_image.size
+            aspect_ratio = orig_height / orig_width
+            
+            canvas_width = 800  # Fix asztal szélesség
+            canvas_height = int(canvas_width * aspect_ratio)
+            
+            # 2. SENIOR TRÜKK: Hajszálpontosan a vászonra méretezzük a képet!
+            # Így 0 memóriapazarlás lesz, a feltöltés pedig villámgyors.
+            bg_image = bg_image.resize((canvas_width, canvas_height), Image.Resampling.LANCZOS)
             
         except Exception as e:
             st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
             st.stop()
-        
-        # Kiszámoljuk a böngészőben megjelenő vászon pontos méreteit
-        width, height = bg_image.size
-        aspect_ratio = height / width
-        canvas_width = 800  # Ez a monitorodon megjelenő fix szélesség
-        canvas_height = int(canvas_width * aspect_ratio)
 
     # ==========================================
     # 2. VTT ESZKÖZTÁR (Oldalsáv)
@@ -76,7 +72,10 @@ if uploaded_file is not None:
     # ==========================================
     st.markdown("### 🎲 Asztal")
     
-    # A canvas komponens meghívása a már optimalizált képpel!
+    # 3. SENIOR TRÜKK: Dinamikus kulcs a fájlnévből!
+    # Így a rendszer nem használja az előző, elrontott fehér "cache-t".
+    canvas_key = f"vtt_{uploaded_file.name}"
+    
     canvas_result = st_canvas(
         fill_color=fill_color,
         stroke_width=stroke_width,
@@ -86,7 +85,7 @@ if uploaded_file is not None:
         height=canvas_height,
         width=canvas_width,
         drawing_mode=drawing_mode,
-        key="vtt_canvas",
+        key=canvas_key,
     )
 
 else:
