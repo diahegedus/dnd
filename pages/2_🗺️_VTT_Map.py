@@ -6,28 +6,33 @@ st.set_page_config(page_title="VTT Map", page_icon="🗺️", layout="wide")
 st.title("🗺️ VTT Térkép és Háború Ködje")
 
 # ==========================================
-# 1. TÉRKÉP FELTÖLTÉSE
+# 1. TÉRKÉP FELTÖLTÉSE ÉS OKOS TÖMÖRÍTÉSE
 # ==========================================
-st.markdown("Töltsd fel a harctéri térképet (JPG vagy PNG), majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
+st.markdown("Töltsd fel a harctéri térképet (akár nagy felbontásút is!), majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
 
 uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg", "jpeg"])
 
 if uploaded_file is not None:
-    try:
-        # Kép betöltése PIL segítségével (és RGB konverzió a fekete hátterek ellen)
-        bg_image = Image.open(uploaded_file).convert("RGB")
-    except Exception as e:
-        st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
-        st.stop()
-    
-    # Eredeti képarány megtartása a vászonhoz
-    width, height = bg_image.size
-    aspect_ratio = height / width
-    canvas_width = 800  # Fix szélesség a jó UI élményért
-    canvas_height = int(canvas_width * aspect_ratio)
-    
-    # ÚJ SOR: Lekicsinyítjük a képet a böngésző számára, így megszűnik a "fehér doboz" hiba!
-    bg_image = bg_image.resize((canvas_width, canvas_height))
+    with st.spinner("Térkép feldolgozása az asztalra..."):
+        try:
+            # Kép betöltése és RGB konverzió
+            bg_image = Image.open(uploaded_file).convert("RGB")
+            
+            # --- A SENIOR TRÜKK: AUTOMATIKUS MÉRETEZÉS ---
+            # Ha a kép gigantikus, visszaméretezzük egy biztonságos, de szép felbontásra (max 1600x1600)
+            # A thumbnail() megtartja a tökéletes képarányt, és a LANCZOS adja a legszebb minőséget.
+            max_size = (1600, 1600)
+            bg_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+            
+        except Exception as e:
+            st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
+            st.stop()
+        
+        # Kiszámoljuk a böngészőben megjelenő vászon pontos méreteit
+        width, height = bg_image.size
+        aspect_ratio = height / width
+        canvas_width = 800  # Ez a monitorodon megjelenő fix szélesség
+        canvas_height = int(canvas_width * aspect_ratio)
 
     # ==========================================
     # 2. VTT ESZKÖZTÁR (Oldalsáv)
@@ -49,20 +54,19 @@ if uploaded_file is not None:
 
     stroke_width = st.sidebar.slider("Vonalvastagság", 1, 25, 3)
     
-    # Intelligens színválasztó a funkció alapján
     if drawing_mode in ["rect", "polygon"]:
         st.sidebar.info("Tipp: Rajzolj formákat a szobák letakarásához (Fog of War).")
         stroke_color = "#000000"
-        fill_color = "rgba(0, 0, 0, 1.0)" # Fekete, nem átlátszó
+        fill_color = "rgba(0, 0, 0, 1.0)"
     elif drawing_mode == "circle":
         st.sidebar.info("Tipp: AoE varázslat. Félig átlátszó piros kör.")
         stroke_color = "#FF0000"
-        fill_color = "rgba(255, 0, 0, 0.3)" # Átlátszó piros
+        fill_color = "rgba(255, 0, 0, 0.3)"
     elif drawing_mode == "transform":
         st.sidebar.info("Tipp: Kattints egy letakart szobára, majd nyomd meg a **Delete / Backspace** gombot a billentyűzeten a felfedéshez!")
         stroke_color = "#000000"
         fill_color = "rgba(0, 0, 0, 0)"
-    else:  # freedraw, line
+    else:
         st.sidebar.info("Tipp: Szabadkézi rajz vagy vonal meghúzása a térképen.")
         stroke_color = st.sidebar.color_picker("Vonal Színe", "#FFFF00")
         fill_color = "rgba(0, 0, 0, 0)"
@@ -72,12 +76,12 @@ if uploaded_file is not None:
     # ==========================================
     st.markdown("### 🎲 Asztal")
     
-    # A canvas komponens meghívása
+    # A canvas komponens meghívása a már optimalizált képpel!
     canvas_result = st_canvas(
         fill_color=fill_color,
         stroke_width=stroke_width,
         stroke_color=stroke_color,
-        background_image=bg_image, # Itt adjuk át a nyers PIL képet!
+        background_image=bg_image, 
         update_streamlit=True,
         height=canvas_height,
         width=canvas_width,
