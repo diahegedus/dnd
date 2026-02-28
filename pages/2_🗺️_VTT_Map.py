@@ -14,12 +14,14 @@ if "cached_map_image" not in st.session_state:
 # 1. TÉRKÉP FELTÖLTÉSE
 # ==========================================
 st.markdown("Töltsd fel a harctéri térképet (JPG vagy PNG), majd használd a bal oldali eszközöket a letakarásához vagy a területre ható (AoE) varázslatok berajzolásához.")
-bg_image = Image.open(uploaded_file).convert("RGB")
+
+# ELŐSZÖR bekérjük a fájlt
 uploaded_file = st.file_uploader("Válaszd ki a térképet", type=["png", "jpg", "jpeg"])
 
+# UTÁNA dolgozzuk fel, ha van mit
 if uploaded_file is not None:
     try:
-        # Kép betöltése PIL segítségével
+        # Kép betöltése PIL segítségével (RGB konverzióval a transzparencia hibák ellen)
         bg_image = Image.open(uploaded_file).convert("RGB")
         
         # PIL kép BytesIO-ba konvertálása az st_canvas-nak (cache-elve session state-ben)
@@ -31,6 +33,7 @@ if uploaded_file is not None:
         else:
             img_io = st.session_state.cached_map_image
             img_io.seek(0)  # Reset stream position
+            
     except Exception as e:
         st.error(f"❌ Hiba a kép betöltésekor: {str(e)}")
         st.stop()
@@ -89,17 +92,13 @@ if uploaded_file is not None:
         fill_color=fill_color,
         stroke_width=stroke_width,
         stroke_color=stroke_color,
-        background_image=img_io,
+        background_image=img_io, # Itt a cache-elt BytesIO-t használjuk
         update_streamlit=True,
         height=canvas_height,
         width=canvas_width,
         drawing_mode=drawing_mode,
         key="vtt_canvas",
     )
-
-    # Későbbi mentéshez / token mozgatáshoz a JSON adatok kinyerhetők
-    # if canvas_result.json_data is not None:
-    #     st.dataframe(pd.json_normalize(canvas_result.json_data["objects"]))
 
 else:
     st.info("Kérlek, tölts fel egy térképet a kezdéshez! 🗺️")
