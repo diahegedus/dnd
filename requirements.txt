@@ -1,6 +1,6 @@
 streamlit==1.36.0
 groq
 pandas
-streamlit-drawable-canvas==0.9.3
+streamlit-drawable-canvas==0.8.0
 Pillow
 streamlit-agraph
