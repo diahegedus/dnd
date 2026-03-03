@@ -125,7 +125,27 @@ async def upload_token(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
     return {"url": f"http://localhost:8000/tokens/{fname}"}
 
-# --- A többi AI és Encounter végpont változatlan marad a kódod alapján ---
+# --- AI ÉS LORE VÉGPONTOK ---
+@app.post("/api/ai/lore-master", response_model=AIResponse)
+async def ask_lore_master(req: PromptRequest):
+    try:
+        current_lore = ""
+        if os.path.exists(LORE_FILE):
+            with open(LORE_FILE, "r", encoding="utf-8") as f:
+                current_lore = f.read()
+        
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": f"D&D Kalandmester vagy. Lore: {current_lore}"},
+                {"role": "user", "content": req.prompt}
+            ],
+            model="llama-3.3-70b-versatile"
+        )
+        return AIResponse(result=chat_completion.choices[0].message.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# (A többi szabálybíró, NJK generátor és encounter végpont változatlanul mehet bele)
 
 # ==========================================
 # ALKALMAZÁS INICIALIZÁLÁSA
