@@ -14,7 +14,7 @@ load_dotenv()
 
 app = FastAPI(
     title="D&D Kalandmester API",
-    description="Backend motor a React VTT, AI és Encounter Trackerhez",
+    description="Backend motor VTT-hez, AI-hoz és Kaland Kódexhez (Lore Vault)",
     version="1.0.0"
 )
 
@@ -30,18 +30,29 @@ api_key = os.getenv("GROQ_API_KEY")
 if api_key:
     groq_client = Groq(api_key=api_key)
 
+# ==========================================
+# 0. MAPPÁK ÉS FÁJLOK BEÁLLÍTÁSA
+# ==========================================
+# Térképek mappája
 UPLOAD_DIR = "uploads/maps"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/maps", StaticFiles(directory=UPLOAD_DIR), name="maps")
 
-# ==========================================
-# 1. ENCOUNTER ÁLLAPOT (Memóriában tárolt "Adatbázis")
-# ==========================================
-# Ez a lista fogja tárolni, hogy kik vannak épp harcban az asztalon.
+# Kaland Kódexe (Lore Vault) beállítása
+LORE_DIR = "uploads/lore"
+os.makedirs(LORE_DIR, exist_ok=True)
+LORE_FILE = os.path.join(LORE_DIR, "campaign_lore.txt")
+
+# Ha még nincs Kódex fájl, létrehozzuk üresen
+if not os.path.exists(LORE_FILE):
+    with open(LORE_FILE, "w", encoding="utf-8") as f:
+        f.write("A kaland kódexe. Itt gyűlnek a Kalandmester titkos jegyzetei:\n\n")
+
+# Encounter memória
 active_encounter = []
 
 # ==========================================
-# 2. ADATMODELLEK
+# 1. ADATMODELLEK
 # ==========================================
 class PromptRequest(BaseModel):
     prompt: str
@@ -49,7 +60,6 @@ class PromptRequest(BaseModel):
 class AIResponse(BaseModel):
     result: str
 
-# ÚJ: Harctéri résztvevő modellje
 class Combatant(BaseModel):
     id: str
     name: str
@@ -60,26 +70,11 @@ class Combatant(BaseModel):
     initiative: int = 0
 
 # ==========================================
-# 3. ALAP ÉS AI VÉGPONTOK (A korábbiak)
+# 2. ALAP VÉGPONTOK ÉS TÉRKÉP
 # ==========================================
 @app.get("/")
 async def root():
-    return {"message": "A D&D Kalandmester Backend aktív. 🎲"}
-
-@app.post("/api/ai/rules-lawyer", response_model=AIResponse)
-async def ask_rules_lawyer(req: PromptRequest):
-    try:
-        chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "Te egy profi D&D 5e Szabálybíró vagy. Légy pontos és hivatkozz a szabályokra magyarul."},
-                {"role": "user", "content": req.prompt}
-            ],
-            model="llama-3.3-70b-versatile",
-            temperature=0.3,
-        )
-        return AIResponse(result=chat_completion.choices[0].message.content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"message": "A D&D Kalandmester Backend (Lore Vaulttal) aktív. 🎲"}
 
 @app.post("/api/vtt/upload-map")
 async def upload_map(file: UploadFile = File(...)):
@@ -87,68 +82,85 @@ async def upload_map(file: UploadFile = File(...)):
         file_extension = file.filename.split(".")[-1]
         unique_filename = f"{uuid.uuid4()}.{file_extension}"
         file_path = os.path.join(UPLOAD_DIR, unique_filename)
-
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-
-        return {
-            "message": "Térkép feltöltve!", 
-            "url": f"http://localhost:8000/maps/{unique_filename}",
-            "filename": unique_filename
-        }
+        return {"message": "Térkép feltöltve!", "url": f"http://localhost:8000/maps/{unique_filename}", "filename": unique_filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 # ==========================================
-# 4. ÚJ: ENCOUNTER TRACKER VÉGPONTOK
+# 3. ÚJ: KALAND KÓDEXE ÉS LORE MASTER AI
 # ==========================================
+@app.post("/api/lore/upload")
+async def upload_lore(file: UploadFile = File(...)):
+    """Ide töltheted fel a TXT formátumú jegyzeteidet a kampányról."""
+    try:
+        content = await file.read()
+        text_content = content.decode("utf-8")
+        
+        # Hozzáírjuk a feltöltött szöveget a közös Kódexhez
+        with open(LORE_FILE, "a", encoding="utf-8") as f:
+            f.write(f"\n--- Új bejegyzés: {file.filename} ---\n")
+            f.write(text_content)
+            f.write("\n")
+            
+        return {"message": f"'{file.filename}' sikeresen hozzáadva a Kódexhez! Az AI mostantól ismeri ezt a történetet."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hiba a Lore olvasásakor: {str(e)}")
 
-# 4.1 Szörny adatainak behúzása a D&D 5e SRD-ből (mint a D&D Beyond)
+@app.post("/api/ai/lore-master", response_model=AIResponse)
+async def ask_lore_master(req: PromptRequest):
+    """Ez az AI végpont a SAJÁT jegyzeteid alapján válaszol."""
+    try:
+        # Beolvassuk a jelenlegi teljes Kódexet
+        with open(LORE_FILE, "r", encoding="utf-8") as f:
+            current_lore = f.read()
+            
+        system_prompt = f"""Te egy D&D Kalandmester asszisztens vagy. A válaszaidat KIZÁRÓLAG az alábbi Kódexre (Lore) alapozd:
+        
+        --- KALAND KÓDEXE ---
+        {current_lore}
+        ---------------------
+        
+        Ha a játékos/kalandmester kérdésére nincs válasz a Kódexben, találd ki logikusan a világ hangulatához illően, vagy mondd el, hogy ez még rejtély. Magyarul válaszolj!"""
+        
+        chat_completion = groq_client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": req.prompt}
+            ],
+            model="llama-3.3-70b-versatile",
+            temperature=0.6,
+        )
+        return AIResponse(result=chat_completion.choices[0].message.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==========================================
+# 4. KORÁBBI AI ÉS ENCOUNTER VÉGPONTOK (Rövidítve a kód tisztaságáért)
+# ==========================================
+@app.post("/api/ai/rules-lawyer", response_model=AIResponse)
+async def ask_rules_lawyer(req: PromptRequest):
+    chat_completion = groq_client.chat.completions.create(
+        messages=[{"role": "system", "content": "Te egy D&D 5e Szabálybíró vagy."}, {"role": "user", "content": req.prompt}],
+        model="llama-3.3-70b-versatile", temperature=0.3)
+    return AIResponse(result=chat_completion.choices[0].message.content)
+
 @app.get("/api/encounter/search-monster/{monster_index}")
 async def search_monster(monster_index: str):
-    """
-    Kikeresi egy szörny alapadatait az internetes D&D adatbázisból.
-    Példa bemenet: 'goblin', 'adult-red-dragon', 'bandit'
-    """
-    try:
-        url = f"https://www.dnd5eapi.co/api/monsters/{monster_index.lower()}"
-        response = requests.get(url)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # Kinyerjük az AC (Armor Class) értéket
-            ac = 10
-            if "armor_class" in data and len(data["armor_class"]) > 0:
-                ac = data["armor_class"][0]["value"]
-                
-            return {
-                "name": data["name"],
-                "max_hp": data["hit_points"],
-                "ac": ac,
-                "dexterity": data["dexterity"], # Hasznos a Kezdeményezés dobáshoz!
-                "type": data["type"],
-                "size": data["size"]
-            }
-        else:
-            raise HTTPException(status_code=404, detail="Szörny nem található az SRD-ben.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    url = f"https://www.dnd5eapi.co/api/monsters/{monster_index.lower()}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        ac = data["armor_class"][0]["value"] if "armor_class" in data and len(data["armor_class"]) > 0 else 10
+        return {"name": data["name"], "max_hp": data["hit_points"], "ac": ac, "dexterity": data["dexterity"]}
+    raise HTTPException(status_code=404, detail="Szörny nem található.")
 
-# 4.2 Harcos hozzáadása az asztalhoz
 @app.post("/api/encounter/add")
 async def add_combatant(combatant: Combatant):
     active_encounter.append(combatant.dict())
     return {"message": f"{combatant.name} csatlakozott a harchoz!"}
 
-# 4.3 Jelenlegi harcállás lekérése (Kezdeményezés szerint rendezve!)
 @app.get("/api/encounter/current")
 async def get_encounter():
-    # Rendezzük a listát csökkenő sorrendbe az initiative (kezdeményezés) alapján
-    sorted_encounter = sorted(active_encounter, key=lambda x: x["initiative"], reverse=True)
-    return {"combatants": sorted_encounter}
-
-# 4.4 Harc vége (Asztal letakarítása)
-@app.delete("/api/encounter/clear")
-async def clear_encounter():
-    active_encounter.clear()
-    return {"message": "A harc véget ért, az asztal letakarítva!"}
+    return {"combatants": sorted(active_encounter, key=lambda x: x["initiative"], reverse=True)}
