@@ -2,6 +2,8 @@ import os
 import shutil
 import uuid
 import requests
+import re
+import random
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,8 +12,120 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import Groq
 
-# Környezeti változók betöltése (.env fájlból)
 load_dotenv()
+
+app = FastAPI(
+    title="D&D Kalandmester API",
+    description="Backend motor VTT-hez, AI-hoz, Kaland Kódexhez és Encounter Trackerhez",
+    version="1.1.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+api_key = os.getenv("GROQ_API_KEY")
+if api_key:
+    groq_client = Groq(api_key=api_key)
+
+# ==========================================
+# MAPPÁK BEÁLLÍTÁSA
+# ==========================================
+UPLOAD_DIR = "uploads/maps"
+TOKEN_DIR = "uploads/tokens" # ÚJ: Tokenek helye
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(TOKEN_DIR, exist_ok=True)
+
+app.mount("/maps", StaticFiles(directory=UPLOAD_DIR), name="maps")
+app.mount("/tokens", StaticFiles(directory=TOKEN_DIR), name="tokens")
+
+# Kaland Kódexe (Lore Vault)
+LORE_DIR = "uploads/lore"
+os.makedirs(LORE_DIR, exist_ok=True)
+LORE_FILE = os.path.join(LORE_DIR, "campaign_lore.txt")
+
+if not os.path.exists(LORE_FILE):
+    with open(LORE_FILE, "w", encoding="utf-8") as f:
+        f.write("A kaland kódexe. Itt gyűlnek a Kalandmester titkos jegyzetei:\n\n")
+
+active_encounter = []
+
+# ==========================================
+# ADATMODELLEK
+# ==========================================
+class PromptRequest(BaseModel):
+    prompt: str
+
+class AIResponse(BaseModel):
+    result: str
+
+class Combatant(BaseModel):
+    id: str
+    name: str
+    is_player: bool
+    hp: int
+    max_hp: int
+    ac: int
+    initiative: int = 0
+
+# ÚJ: Kockadobás modell
+class DiceRollRequest(BaseModel):
+    expression: str # pl: "1d20+5"
+
+# ==========================================
+# VÉGPONTOK
+# ==========================================
+
+# 1. KOCKADOBÓ MOTOR (ÚJ)
+@app.post("/api/dice/roll")
+async def roll_dice(req: DiceRollRequest):
+    """Dob egyet a megadott formátumban (pl: 2d6+4)"""
+    try:
+        # Regex a formátum ellenőrzésére: [darab]d[oldal]+[módosító]
+        match = re.match(r"(\d+)d(\d+)(?:\+(\d+))?", req.expression.lower())
+        if not match:
+            raise HTTPException(status_code=400, detail="Érvénytelen formátum. Példa: 1d20+5")
+        
+        count = int(match.group(1))
+        sides = int(match.group(2))
+        mod = int(match.group(3)) if match.group(3) else 0
+        
+        rolls = [random.randint(1, sides) for _ in range(count)]
+        total = sum(rolls) + mod
+        
+        return {
+            "expression": req.expression,
+            "rolls": rolls,
+            "modifier": mod,
+            "total": total
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 2. TÉRKÉP ÉS TOKEN FELTÖLTÉS
+@app.post("/api/vtt/upload-map")
+async def upload_map(file: UploadFile = File(...)):
+    file_ext = file.filename.split(".")[-1]
+    fname = f"{uuid.uuid4()}.{file_ext}"
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    with open(fpath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"url": f"http://localhost:8000/maps/{fname}"}
+
+@app.post("/api/vtt/upload-token")
+async def upload_token(file: UploadFile = File(...)):
+    file_ext = file.filename.split(".")[-1]
+    fname = f"{uuid.uuid4()}.{file_ext}"
+    fpath = os.path.join(TOKEN_DIR, fname)
+    with open(fpath, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    return {"url": f"http://localhost:8000/tokens/{fname}"}
+
+# --- A többi AI és Encounter végpont változatlan marad a kódod alapján ---
 
 # ==========================================
 # ALKALMAZÁS INICIALIZÁLÁSA
