@@ -1,6 +1,5 @@
-streamlit==1.39.0
+fastapi
+uvicorn
 groq
-pandas
-streamlit-drawable-canvas==0.9.3
-Pillow
-streamlit-agraph
+python-dotenv
+pydantic
