@@ -217,6 +217,46 @@ async def search_monster(monster_index: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/beyond/character/{character_id}")
+async def import_beyond_character(character_id: str):
+    """Karakter azonnali behúzása a D&D Beyond rejtett adatközpontjából."""
+    try:
+        url = f"https://character-service.dndbeyond.com/character/v5/character/{character_id}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"} 
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json().get("data", {})
+            name = data.get("name", "Ismeretlen Hős")
+            
+            base_hp = data.get("baseHitPoints", 0)
+            bonus_hp = data.get("bonusHitPoints", 0)
+            max_hp = base_hp + bonus_hp 
+            
+            dex_stat = next((stat for stat in data.get("stats", []) if stat["id"] == 2), None)
+            dex_value = dex_stat["value"] if dex_stat else 10
+            initiative_mod = (dex_value - 10) // 2
+            base_ac = 10 + initiative_mod
+            
+            return {
+                "message": f"{name} adatai sikeresen letöltve!",
+                "combatant": {
+                    "id": f"beyond_{character_id}",
+                    "name": name,
+                    "is_player": True,
+                    "max_hp": max_hp,
+                    "hp": max_hp,
+                    "ac": base_ac,
+                    "initiative": initiative_mod  # Ezt majd a Reactben lehet módosítani a dobás után
+                }
+            }
+        elif response.status_code in [403, 404]:
+            raise HTTPException(status_code=404, detail="Karakter nem található, vagy privátra van állítva a Beyondban.")
+        else:
+            raise HTTPException(status_code=500, detail="A D&D Beyond szervere nem válaszol.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hiba a szinkronizálásakor: {str(e)}")
+
 @app.post("/api/encounter/add")
 async def add_combatant(combatant: Combatant):
     """Karakter/Szörny hozzáadása a harchoz."""
