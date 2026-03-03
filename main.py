@@ -12,14 +12,16 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import Groq
 
+# Környezeti változók betöltése
 load_dotenv()
 
 app = FastAPI(
-    title="D&D Kalandmester API",
-    description="Backend motor VTT-hez, AI-hoz, Kaland Kódexhez és Encounter Trackerhez",
-    version="1.1.0"
+    title="D&D Kalandmester API - Final Backend",
+    description="VTT Motor, AI Asszisztens, Lore Vault és Kockadobó rendszer",
+    version="1.2.0"
 )
 
+# CORS beállítások
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -28,31 +30,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Groq kliens
 api_key = os.getenv("GROQ_API_KEY")
-if api_key:
-    groq_client = Groq(api_key=api_key)
+groq_client = Groq(api_key=api_key) if api_key else None
 
 # ==========================================
-# MAPPÁK BEÁLLÍTÁSA
+# MAPPÁK ÉS STATIKUS FÁJLOK
 # ==========================================
-UPLOAD_DIR = "uploads/maps"
-TOKEN_DIR = "uploads/tokens" # ÚJ: Tokenek helye
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-os.makedirs(TOKEN_DIR, exist_ok=True)
+BASE_UPLOAD = "uploads"
+MAPS_DIR = os.path.join(BASE_UPLOAD, "maps")
+TOKENS_DIR = os.path.join(BASE_UPLOAD, "tokens")
+LORE_DIR = os.path.join(BASE_UPLOAD, "lore")
 
-app.mount("/maps", StaticFiles(directory=UPLOAD_DIR), name="maps")
-app.mount("/tokens", StaticFiles(directory=TOKEN_DIR), name="tokens")
+for d in [MAPS_DIR, TOKENS_DIR, LORE_DIR]:
+    os.makedirs(d, exist_ok=True)
 
-# Kaland Kódexe (Lore Vault)
-LORE_DIR = "uploads/lore"
-os.makedirs(LORE_DIR, exist_ok=True)
+# Statikus elérhetőség a böngészőnek
+app.mount("/maps", StaticFiles(directory=MAPS_DIR), name="maps")
+app.mount("/tokens", StaticFiles(directory=TOKENS_DIR), name="tokens")
+
 LORE_FILE = os.path.join(LORE_DIR, "campaign_lore.txt")
-
 if not os.path.exists(LORE_FILE):
     with open(LORE_FILE, "w", encoding="utf-8") as f:
-        f.write("A kaland kódexe. Itt gyűlnek a Kalandmester titkos jegyzetei:\n\n")
+        f.write("--- D&D KAMPÁNY KÓDEXE ---\n")
 
+# Memória alapú tárolás (Harc és Dobások)
 active_encounter = []
+roll_history = []
 
 # ==========================================
 # ADATMODELLEK
@@ -63,6 +67,10 @@ class PromptRequest(BaseModel):
 class AIResponse(BaseModel):
     result: str
 
+class DiceRollRequest(BaseModel):
+    expression: str
+    player_name: str = "KM"
+
 class Combatant(BaseModel):
     id: str
     name: str
@@ -72,80 +80,97 @@ class Combatant(BaseModel):
     ac: int
     initiative: int = 0
 
-# ÚJ: Kockadobás modell
-class DiceRollRequest(BaseModel):
-    expression: str # pl: "1d20+5"
-
 # ==========================================
 # VÉGPONTOK
 # ==========================================
 
-# 1. KOCKADOBÓ MOTOR (ÚJ)
+# 1. KOCKADOBÓ (History-val)
 @app.post("/api/dice/roll")
 async def roll_dice(req: DiceRollRequest):
-    """Dob egyet a megadott formátumban (pl: 2d6+4)"""
     try:
-        # Regex a formátum ellenőrzésére: [darab]d[oldal]+[módosító]
         match = re.match(r"(\d+)d(\d+)(?:\+(\d+))?", req.expression.lower())
         if not match:
-            raise HTTPException(status_code=400, detail="Érvénytelen formátum. Példa: 1d20+5")
+            raise HTTPException(status_code=400, detail="Példa: 1d20+5")
         
-        count = int(match.group(1))
-        sides = int(match.group(2))
+        count, sides = int(match.group(1)), int(match.group(2))
         mod = int(match.group(3)) if match.group(3) else 0
         
         rolls = [random.randint(1, sides) for _ in range(count)]
         total = sum(rolls) + mod
         
-        return {
+        result = {
+            "player": req.player_name,
             "expression": req.expression,
             "rolls": rolls,
-            "modifier": mod,
             "total": total
         }
+        roll_history.insert(0, result) # Legfrissebb felül
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# 2. TÉRKÉP ÉS TOKEN FELTÖLTÉS
-@app.post("/api/vtt/upload-map")
-async def upload_map(file: UploadFile = File(...)):
-    file_ext = file.filename.split(".")[-1]
-    fname = f"{uuid.uuid4()}.{file_ext}"
-    fpath = os.path.join(UPLOAD_DIR, fname)
+# 2. VTT FELTÖLTÉSEK
+@app.post("/api/vtt/upload-{type}")
+async def upload_file(type: str, file: UploadFile = File(...)):
+    target_dir = MAPS_DIR if type == "map" else TOKENS_DIR
+    ext = file.filename.split(".")[-1]
+    fname = f"{uuid.uuid4()}.{ext}"
+    fpath = os.path.join(target_dir, fname)
+    
     with open(fpath, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    return {"url": f"http://localhost:8000/maps/{fname}"}
+    
+    return {"url": f"http://localhost:8000/{type}s/{fname}", "name": fname}
 
-@app.post("/api/vtt/upload-token")
-async def upload_token(file: UploadFile = File(...)):
-    file_ext = file.filename.split(".")[-1]
-    fname = f"{uuid.uuid4()}.{file_ext}"
-    fpath = os.path.join(TOKEN_DIR, fname)
-    with open(fpath, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    return {"url": f"http://localhost:8000/tokens/{fname}"}
+# 3. AI LORE MASTER & IMPROVISE
+@app.post("/api/ai/{mode}", response_model=AIResponse)
+async def ai_assistant(mode: str, req: PromptRequest):
+    if not groq_client: raise HTTPException(status_code=500, detail="Groq API kulcs hiányzik!")
+    
+    lore = ""
+    if os.path.exists(LORE_FILE):
+        with open(LORE_FILE, "r", encoding="utf-8") as f: lore = f.read()
 
-# --- AI ÉS LORE VÉGPONTOK ---
-@app.post("/api/ai/lore-master", response_model=AIResponse)
-async def ask_lore_master(req: PromptRequest):
-    try:
-        current_lore = ""
-        if os.path.exists(LORE_FILE):
-            with open(LORE_FILE, "r", encoding="utf-8") as f:
-                current_lore = f.read()
-        
-        chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": f"D&D Kalandmester vagy. Lore: {current_lore}"},
-                {"role": "user", "content": req.prompt}
-            ],
-            model="llama-3.3-70b-versatile"
-        )
-        return AIResponse(result=chat_completion.choices[0].message.content)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    prompts = {
+        "lore-master": f"Te egy D&D Kalandmester vagy. Lore tudásod: {lore}. Válaszolj a játékosnak!",
+        "improvise": f"Adj 3 kreatív ötletet a szituációra a kampány hangulatában! Lore: {lore}",
+        "rules": "Profi D&D 5e szabálybíró vagy. Idézz szabálykönyvből magyarul!"
+    }
 
-# (A többi szabálybíró, NJK generátor és encounter végpont változatlanul mehet bele)
+    completion = groq_client.chat.completions.create(
+        messages=[{"role": "system", "content": prompts.get(mode, "Segíts a játékban!")}, 
+                  {"role": "user", "content": req.prompt}],
+        model="llama-3.3-70b-versatile", temperature=0.7)
+    
+    return AIResponse(result=completion.choices[0].message.content)
+
+# 4. ENCOUNTER & BEYOND
+@app.get("/api/beyond/character/{character_id}")
+async def import_beyond(character_id: str):
+    url = f"https://character-service.dndbeyond.com/character/v5/character/{character_id}"
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+    if resp.status_code != 200: raise HTTPException(status_code=404, detail="Hiba a Beyond elérésekor.")
+    
+    d = resp.json().get("data", {})
+    hp = d.get("baseHitPoints", 0) + d.get("bonusHitPoints", 0)
+    return {"combatant": {"id": f"beyond_{character_id}", "name": d.get("name"), "hp": hp, "max_hp": hp, "ac": 10, "is_player": True}}
+
+@app.post("/api/encounter/add")
+async def add_combatant(c: Combatant):
+    active_encounter.append(c.dict())
+    return {"status": "success"}
+
+@app.get("/api/encounter/current")
+async def get_encounter():
+    return {"combatants": sorted(active_encounter, key=lambda x: x["initiative"], reverse=True)}
+
+@app.delete("/api/encounter/clear")
+async def clear_encounter():
+    active_encounter.clear()
+    return {"message": "Table cleared"}
+
+@app.get("/")
+async def health(): return {"status": "active", "dice": "ready"}
 
 # ==========================================
 # ALKALMAZÁS INICIALIZÁLÁSA
